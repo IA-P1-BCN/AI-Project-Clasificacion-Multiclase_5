@@ -2,6 +2,14 @@
 
 > Plan and results of the exploratory data analysis.
 
+## Contents
+
+- [Plan](#plan)
+- [Dataset audit](#dataset-audit)
+- [Class distribution](#class-distribution)
+- [Feature analysis](#feature-analysis)
+- [Findings](#findings)
+
 ## Plan
 
 - [x] Audit the dataset (rows, columns, dtypes, nulls, duplicates)
@@ -33,7 +41,7 @@ Reproduce with: `python src/data_audit.py`
 | Soil_Type1 - Soil_Type40 | 40 | int64 |
 | Cover_Type (target) | 1 | int64 |
 
-### Findings
+### Audit findings
 
 - Row and column counts match the official metadata (581,012 x 55).
 - No null values and no fully duplicated rows were found. Nothing was removed or imputed (audit only).
@@ -158,4 +166,40 @@ Features shown: `Elevation`, `Horizontal_Distance_To_Roadways`, `Slope` and `Hor
 
 ## Findings
 
-_To be filled in M2._
+Summary of the M2 exploratory analysis. The recommendations are inputs for M3 (cleaning and preprocessing); none of them has been applied yet.
+
+### Key findings
+
+| Area | Finding | Section |
+|---|---|---|
+| Data quality | 581,012 rows x 55 columns, no nulls, no duplicate rows, all columns int64. Nothing to clean regarding missing values or duplicates. | Dataset audit |
+| Class balance | Strong imbalance: classes 1 and 2 hold about 85% of the rows, class 4 only 0.47% (min/max ratio 0.0097, about 1:103). | Class distribution |
+| Separating features | `Elevation` dominates (eta squared 0.616). `Horizontal_Distance_To_Roadways` (0.096), `Slope` (0.074) and `Horizontal_Distance_To_Fire_Points` (0.070) contribute modestly; the other numeric features are weak on their own. | Feature analysis |
+| Redundancy | No feature pair reaches 0.8 in absolute correlation (largest: `Hillshade_9am` / `Hillshade_3pm`, -0.78), but PC10 explains about 0% of the variance, which suggests an almost exact linear dependency among the numeric features. | Feature analysis |
+| Distributions | No feature is clearly normal. Strongest skew: `Vertical_Distance_To_Hydrology` (1.79), `Horizontal_Distance_To_Fire_Points` (1.29), `Horizontal_Distance_To_Hydrology` (1.14). Up to 5.4% of rows fall outside the IQR fences. | Feature analysis |
+| Representation | The 44 binary indicators and the target are stored as int64. `Aspect` is an angle in degrees. | Dataset audit |
+
+### Recommendations for M3 (to be confirmed by the team)
+
+1. **Class imbalance.** Use a stratified train/test split (and stratified cross-validation). Evaluate with per-class metrics and macro F1, not accuracy alone. Compare class weights and resampling, applying resampling only to training data.
+2. **Missing values and duplicates.** Nothing to handle. Do not drop IQR outliers by default: they look like long tails of skewed variables, and they were not confirmed as errors.
+3. **Scaling and transformations.** Scale the features for linear and distance-based models and consider transforming the skewed distance features. Tree-based models do not need either.
+4. **Feature engineering candidates.** Sine/cosine encoding of `Aspect`; a combined distance to hydrology from the horizontal and vertical distances; check whether the hillshade features add information beyond `Aspect` and `Slope`.
+5. **Redundancy.** For linear models, use regularization or drop a hillshade feature. First verify the linear dependency suggested by PCA.
+
+### Limitations of this EDA
+
+- The 44 binary `Wilderness_Area` / `Soil_Type` indicators were audited but not analyzed against the class; doing so in M3 may reveal useful features.
+- Eta squared only captures differences between class means, and the 2D PCA projection is not expected to separate the classes well.
+- No transformation, cleaning or balancing was applied in M2.
+
+### Reproducibility
+
+All scripts need `data/raw/covtype.data` (see the README) and save their figures in `docs/figures/`.
+
+| Script | Produces |
+|---|---|
+| `src/data_audit.py` | Audit table (rows, columns, dtypes, nulls, duplicates) |
+| `src/class_distribution.py` | Class frequencies, imbalance ratio, `class_distribution.png` |
+| `src/class_eda.py` | `class_histograms.png`, `class_boxplots.png`, `correlation_matrix.png`, class separation ranking |
+| `src/statistical_insights.py` | Skewness and kurtosis, `feature_distributions.png`, `pairplot_top_features.png`, `pca_projection.png` |
