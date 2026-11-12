@@ -1,0 +1,37 @@
+services:
+  app:
+    build: .
+    container_name: multiclass_app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Live-reload source during development
+      - ./app:/app/app
+      - ./src:/app/src
+    env_file:
+      - path: .env
+        required: false
+    # Uncomment once the DB service below is enabled
+    # depends_on:
+    #   - db
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Optional database service (enable when needed, e.g. M6 feedback/retraining).
+  # Uncomment this block and the `depends_on` above, then run `docker compose up`.
+  # ---------------------------------------------------------------------------
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: multiclass_db
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-app}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+  #     POSTGRES_DB: ${POSTGRES_DB:-multiclass}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - db_data:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   db_data:

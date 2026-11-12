@@ -54,21 +54,58 @@ Multiclass classification is a supervised learning task in which each input inst
 .
 ├── README.md
 ├── SPEC.md
+├── CONTRIBUTING.md        # Git workflow & commit convention
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt       # Pinned dependencies (reproducible)
+├── .python-version        # 3.11
+├── .env.example
 ├── docs/
 │   ├── EDA.md
 │   ├── MODELING.md
 │   ├── APP.md
 │   └── DELIVERABLES.md
 ├── data/
-├── models/
-├── src/
+│   ├── raw/               # Original, immutable data (git-ignored)
+│   └── processed/         # Cleaned/feature-engineered data (git-ignored)
+├── models/                # Trained model artifacts (git-ignored)
+├── src/                   # Library code (preprocessing, training, ...)
 └── app/
+    └── main.py            # Streamlit app
 ```
 
-## Setup
+## Setup / Getting started
+
+**Requirements:** [Docker](https://docs.docker.com/get-docker/) with Compose v2.
+
+A clean clone runs with two commands:
 
 ```bash
+git clone https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5.git
+cd AI-Project-Clasificacion-Multiclase_5
 docker compose up
 ```
+
+Then open the app at **http://localhost:8501**. To stop: `Ctrl+C` (or
+`docker compose down`). After changing `requirements.txt` or the `Dockerfile`,
+rebuild with `docker compose up --build`.
+
+### Local development without Docker (optional)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app/main.py
+```
+
+> An optional PostgreSQL service is already defined (commented) in
+> `docker-compose.yml` for later milestones. Copy `.env.example` to `.env`
+> and uncomment the `db` block to enable it.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch model (`main` / `develop`
+/ `feature/*`) and the Conventional Commits convention.
 
 See [docs/APP.md](docs/APP.md) for the application requirements and [SPEC.md](SPEC.md) for the technical specification.
