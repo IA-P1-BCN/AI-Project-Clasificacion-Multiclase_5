@@ -55,6 +55,9 @@ Multiclass classification is a supervised learning task in which each input inst
 ├── README.md
 ├── SPEC.md
 ├── CONTRIBUTING.md        # Git workflow & commit convention
+├── AGENTS.md              # Rules for AI coding agents
+├── specs/                 # Ontology + one spec per branch
+├── .claude/               # Subagents and skills for agentic development
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt       # Pinned dependencies (reproducible)
