@@ -62,6 +62,7 @@ Multiclass classification is a supervised learning task in which each input inst
 ├── .env.example
 ├── docs/
 │   ├── EDA.md
+│   ├── PREPROCESSING.md
 │   ├── MODELING.md
 │   ├── APP.md
 │   └── DELIVERABLES.md
