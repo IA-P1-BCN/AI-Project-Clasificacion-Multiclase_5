@@ -70,6 +70,7 @@ Multiclass classification is a supervised learning task in which each input inst
 │   ├── APP.md
 │   └── DELIVERABLES.md
 ├── data/
+│   ├── README.md          # Dataset source, version, size and checksum
 │   ├── raw/               # Original, immutable data (git-ignored)
 │   └── processed/         # Cleaned/feature-engineered data (git-ignored)
 ├── models/                # Trained model artifacts (git-ignored)
@@ -103,6 +104,8 @@ The dataset is **not** stored in the repository (`data/raw/` is git-ignored). Af
 3. Place `covtype.data` in `data/raw/`, so the final path is `data/raw/covtype.data`.
 
 Check that everything is in place with `python src/data_audit.py`.
+
+Source, version, file size and checksum are documented in [data/README.md](data/README.md).
 
 ### Local development without Docker (optional)
 
