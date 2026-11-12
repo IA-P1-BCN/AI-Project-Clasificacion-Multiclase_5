@@ -1,5 +1,7 @@
 # 🎯 Proyecto Clasificación Multiclase
 
+> ℹ️ Original assignment brief (in Spanish). Current project decisions live in `README.md` and `SPEC.md`.
+
 ![Banner notebooks](https://github.com/user-attachments/assets/1da2b87c-a4aa-497c-b50c-3596cbf2f375)
 
 ## 📝 Descripción del Proyecto

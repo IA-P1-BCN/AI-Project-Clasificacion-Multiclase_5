@@ -8,7 +8,7 @@ The goal of this project is to develop a machine learning model capable of solvi
 
 Multiclass classification is a supervised learning task in which each input instance is assigned to a single class among three or more possible ones. Unlike binary classification (two classes), the model must learn to distinguish between multiple mutually exclusive categories.
 
-**Suggested dataset (optional):** *Forest Cover Type Dataset*. Other candidates under evaluation: Dry Bean and Wine. Authenticity of the chosen dataset is encouraged.
+**Dataset:** *Forest Cover Type Dataset* — Roosevelt National Forest, Colorado (7 tree cover types, 54 features).
 
 ## Team
 
@@ -61,6 +61,7 @@ Multiclass classification is a supervised learning task in which each input inst
 ├── .python-version        # 3.11
 ├── .env.example
 ├── docs/
+│   ├── project-briefing.md  # original assignment brief (Spanish)
 │   ├── EDA.md
 │   ├── MODELING.md
 │   ├── APP.md
