@@ -8,6 +8,8 @@ services:
       # Live-reload source during development
       - ./app:/app/app
       - ./src:/app/src
+      - ./data:/app/data
+      - ./models:/app/models
     env_file:
       - path: .env
         required: false
