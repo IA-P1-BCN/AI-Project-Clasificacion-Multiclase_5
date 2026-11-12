@@ -36,7 +36,11 @@ must beat these scores.
 |---|---|---|---|---|
 | DummyClassifier (most_frequent) | 0.4876 | — | — | 0.0937 |
 | DummyClassifier (stratified) | 0.3770 | — | — | 0.1426 |
-| _Real models (M4)_ | — | — | — | — |
+| XGBoost | 0.8690 | 0.8747 | 0.8297 | 0.8494 |
+| LightGBM | 0.8540 | 0.8382 | 0.8098 | 0.8175 |
+
+> Values are the mean over 5-fold stratified cross-validation on the training
+> split (see `specs/feature-22-m4-train-ensemble-model-xgboost-lightgbm.md`).
 
 ## Evaluation metrics
 
