@@ -90,6 +90,15 @@ Then open the app at **http://localhost:8501**. To stop: `Ctrl+C` (or
 `docker compose down`). After changing `requirements.txt` or the `Dockerfile`,
 rebuild with `docker compose up --build`.
 
+### Dataset
+
+The dataset is **not** stored in the repository (`data/raw/` is git-ignored). After cloning, download it and place it locally:
+
+1. Download the *Covertype* dataset from the UCI repository: https://archive.ics.uci.edu/dataset/31/covertype
+2. Extract `covertype.zip`. It contains `covtype.data.gz`; decompress it to obtain `covtype.data` (no header, 581,012 rows x 55 columns).
+3. Place `covtype.data` in `data/raw/`, so the final path is `data/raw/covtype.data`.
+
+Check that everything is in place with `python src/data_audit.py`.
 ### Local development without Docker (optional)
 
 ```bash
