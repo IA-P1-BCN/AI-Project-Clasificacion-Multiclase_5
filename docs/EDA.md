@@ -7,8 +7,8 @@
 - [x] Audit the dataset (rows, columns, dtypes, nulls, duplicates)
 - [x] Analyze class distribution (frequencies, imbalance)
 - [ ] Analyze numeric features (histograms, boxplots)
-- [ ] Analyze feature correlations (correlation matrix)
-- [ ] Classification-specific visualizations (histograms per class)
+- [x] Analyze feature correlations (correlation matrix)
+- [x] Classification-specific visualizations (histograms per class)
 
 ## Dataset audit
 
@@ -62,7 +62,51 @@ Target: `Cover_Type` (7 classes). Reproduce with: `python src/class_distribution
 
 ## Feature analysis
 
-_To be filled in M2._
+Scope: the 10 quantitative features (the 44 binary `Wilderness_Area` / `Soil_Type` indicators are not included). Reproduce with: `python src/class_eda.py`
+
+### Distributions per class
+
+![Histograms per class](figures/class_histograms.png)
+
+![Boxplots per class](figures/class_boxplots.png)
+
+### Correlation matrix
+
+![Correlation matrix](figures/correlation_matrix.png)
+
+Strongest correlations between numeric features (Pearson):
+
+| Feature pair | r |
+|---|---|
+| Hillshade_9am / Hillshade_3pm | -0.780 |
+| Aspect / Hillshade_3pm | 0.647 |
+| Horizontal_Distance_To_Hydrology / Vertical_Distance_To_Hydrology | 0.606 |
+| Hillshade_Noon / Hillshade_3pm | 0.594 |
+| Aspect / Hillshade_9am | -0.579 |
+| Slope / Hillshade_Noon | -0.527 |
+
+No pair exceeds |r| = 0.8, so there is moderate (not extreme) redundancy. The hillshade features correlate with each other and with Aspect and Slope, which is consistent with hillshade being derived from terrain orientation and slope.
+
+### Features that separate the classes
+
+Eta squared (share of each feature's variance explained by `Cover_Type`; higher means the class means differ more):
+
+| Feature | Eta squared |
+|---|---|
+| Elevation | 0.6160 |
+| Horizontal_Distance_To_Roadways | 0.0959 |
+| Slope | 0.0742 |
+| Horizontal_Distance_To_Fire_Points | 0.0698 |
+| Hillshade_9am | 0.0323 |
+| Hillshade_Noon | 0.0293 |
+| Horizontal_Distance_To_Hydrology | 0.0238 |
+| Vertical_Distance_To_Hydrology | 0.0123 |
+| Hillshade_3pm | 0.0106 |
+| Aspect | 0.0046 |
+
+- `Elevation` is by far the most discriminative numeric feature (61.6% of its variance is explained by the class).
+- `Horizontal_Distance_To_Roadways`, `Slope` and `Horizontal_Distance_To_Fire_Points` show some separation (about 7-10%); the remaining features separate the classes weakly on their own.
+- Limitation: eta squared only captures differences between class means. A feature with a low score may still help to tell some classes apart through the shape of its distribution, and the binary soil/wilderness indicators were not evaluated here.
 
 ## Findings
 
