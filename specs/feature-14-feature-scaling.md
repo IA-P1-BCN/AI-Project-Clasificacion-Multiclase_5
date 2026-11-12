@@ -4,14 +4,14 @@
 |---|---|
 | Issue | #14 - [M3] Feature scaling / normalization |
 | Milestone | M3 |
-| Branch | `feature/14-feature-scaling` (stacked on `feature/12-missing-values-duplicates`) |
+| Branch | `feature/14-feature-scaling` (from `develop`) |
 | Owner | @levifvy |
-| Depends on | #12 (missing values and duplicates) |
+| Depends on | #12 (missing values and duplicates, merged) |
 
-The branch is created on top of `feature/12-missing-values-duplicates`
-because the issue depends on #12 and reuses its column constants and
-`clean()`. Merge #12 first; the Pull Request for this branch then targets
-`develop` and shows only the scaling changes.
+The branch was first stacked on `feature/12-missing-values-duplicates`. After
+#12 was squash-merged it was rebased onto `develop`, so it contains only the
+scaling commit. It reuses the column constants and `clean()` from
+`src/data_cleaning.py`.
 
 ## Goal
 
