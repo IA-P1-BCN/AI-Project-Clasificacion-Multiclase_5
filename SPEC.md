@@ -6,14 +6,34 @@ Multiclass classification model that receives input data and returns a single pr
 
 ## 2. Problem definition
 
-- **Type of task:** supervised multiclass classification (≥ 3 classes).
-- **Target variable:** to be defined (see M1).
-- **Success criteria:** overfitting below 5% (difference between training and validation accuracy); accuracy, precision, recall and F1 per class.
+### Objective
+Predict the **forest cover type** (the dominant tree species) of a 30×30 m cell in the Roosevelt National Forest (Colorado, USA), using cartographic and environmental features. This supports forest management, ecological mapping and resource planning.
+
+### Type of task
+Supervised **multiclass classification** — each instance is assigned to exactly one of **7 mutually exclusive classes** (tree cover types).
+
+### Target variable — 7 classes
+1. Spruce/Fir
+2. Lodgepole Pine
+3. Ponderosa Pine
+4. Cottonwood/Willow
+5. Aspen
+6. Douglas-fir
+7. Krummholz
+
+### Features (54)
+- **10 quantitative:** Elevation, Aspect, Slope, Horizontal_Distance_To_Hydrology, Vertical_Distance_To_Hydrology, Horizontal_Distance_To_Roadways, Hillshade_9am, Hillshade_Noon, Hillshade_3pm, Horizontal_Distance_To_Fire_Points.
+- **4 binary (wilderness areas):** Rawah, Neota, Comanche Peak, Cache la Poudre.
+- **40 binary (soil types):** USFS soil-type indicators.
+
+### Success criteria
+- Overfitting below **5%** (gap between training and validation).
+- Report accuracy plus precision / recall / F1 **per class** and the confusion matrix.
 
 ## 3. Dataset
 
-- **Candidates:** Dry Bean, Wine, Forest Cover Type (suggested).
-- **Source & version:** to be documented (see M1).
+- **Dataset:** Forest Cover Type (Covertype) — Roosevelt National Forest, Colorado, USA (US Forest Service / UCI Machine Learning Repository).
+- **Source & version:** to be documented on download (see M1).
 
 ## 4. Functional requirements
 
