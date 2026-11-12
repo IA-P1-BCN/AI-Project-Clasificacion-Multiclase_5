@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+
+# Artifacts
+*.joblib
+*.pkl
+models/
+data/raw/
+data/processed/
