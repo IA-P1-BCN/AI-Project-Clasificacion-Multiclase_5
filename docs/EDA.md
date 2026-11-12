@@ -13,6 +13,7 @@
 ## Dataset audit
 
 Source: UCI Covertype (`data/raw/covtype.data`, no header; column names taken from `covtype.info`).
+Dataset: download from https://archive.ics.uci.edu/dataset/31/covertype and place `covtype.data` in `data/raw/` (not tracked by Git).
 Reproduce with: `python src/data_audit.py`
 
 | Metric | Value |

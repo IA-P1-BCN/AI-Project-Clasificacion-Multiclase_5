@@ -26,6 +26,11 @@ COLUMNS = (
 
 def load_raw(path: Path = DATA_PATH) -> pd.DataFrame:
     """Load the raw file (no header) assigning the official column names."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Dataset not found at {path}. Download the Covertype dataset from "
+            "https://archive.ics.uci.edu/dataset/31/covertype and place covtype.data in data/raw/."
+        )
     return pd.read_csv(path, header=None, names=COLUMNS)
 
 
