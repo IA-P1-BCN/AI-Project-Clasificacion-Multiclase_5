@@ -1,12 +1,21 @@
-numpy
-pandas
-scikit-learn
-matplotlib
-seaborn
-joblib
-streamlit
-fastapi
-uvicorn[standard]
-python-dotenv
-xgboost
-lightgbm
+# Core data & ML
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.1
+joblib==1.4.2
+
+# Visualization
+matplotlib==3.9.2
+seaborn==0.13.2
+
+# Gradient boosting
+xgboost==2.1.1
+lightgbm==4.5.0
+
+# App (frontend + backend)
+streamlit==1.38.0
+fastapi==0.112.2
+uvicorn[standard]==0.30.6
+
+# Config
+python-dotenv==1.0.1

@@ -13,9 +13,12 @@ env/
 # OS
 .DS_Store
 
-# Artifacts
+# Artifacts (ignore contents but keep the folders via .gitkeep)
 *.joblib
 *.pkl
-models/
-data/raw/
-data/processed/
+models/*
+data/raw/*
+data/processed/*
+!models/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
