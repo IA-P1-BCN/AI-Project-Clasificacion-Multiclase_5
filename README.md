@@ -99,6 +99,7 @@ The dataset is **not** stored in the repository (`data/raw/` is git-ignored). Af
 3. Place `covtype.data` in `data/raw/`, so the final path is `data/raw/covtype.data`.
 
 Check that everything is in place with `python src/data_audit.py`.
+
 ### Local development without Docker (optional)
 
 ```bash

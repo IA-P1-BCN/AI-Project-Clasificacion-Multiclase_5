@@ -38,6 +38,9 @@ def distribution_stats(df: pd.DataFrame) -> pd.DataFrame:
 
 def balanced_sample(df: pd.DataFrame, n: int = SAMPLE_PER_CLASS) -> pd.DataFrame:
     """Same number of rows per class. For visualization only."""
+    if df.empty:
+        raise ValueError("Cannot build a balanced sample from an empty DataFrame.")
+    n = min(n, int(df[TARGET].value_counts().min()))
     return df.groupby(TARGET, group_keys=False).sample(n=n, random_state=SEED)
 
 
