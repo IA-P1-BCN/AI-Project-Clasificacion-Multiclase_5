@@ -5,7 +5,7 @@
 ## Plan
 
 - [x] Audit the dataset (rows, columns, dtypes, nulls, duplicates)
-- [ ] Analyze class distribution (frequencies, imbalance)
+- [x] Analyze class distribution (frequencies, imbalance)
 - [ ] Analyze numeric features (histograms, boxplots)
 - [ ] Analyze feature correlations (correlation matrix)
 - [ ] Classification-specific visualizations (histograms per class)
@@ -42,7 +42,23 @@ Reproduce with: `python src/data_audit.py`
 
 ## Class distribution
 
-_To be filled in M2._
+Target: `Cover_Type` (7 classes). Reproduce with: `python src/class_distribution.py`
+
+| Class | Count | Percentage |
+|---|---|---|
+| 1 | 211,840 | 36.46% |
+| 2 | 283,301 | 48.76% |
+| 3 | 35,754 | 6.15% |
+| 4 | 2,747 | 0.47% |
+| 5 | 9,493 | 1.63% |
+| 6 | 17,367 | 2.99% |
+| 7 | 20,510 | 3.53% |
+
+![Class distribution](figures/class_distribution.png)
+
+**Imbalance:** the least frequent class (4, 2,747 samples) versus the most frequent (2, 283,301 samples) gives a min/max ratio of 0.0097, about 1:103. Classes 1 and 2 together account for about 85% of the samples.
+
+**Is imbalance handling needed?** Yes. The imbalance is strong, so plain accuracy would be misleading (always predicting class 2 already gives about 49%). For M3 this suggests a stratified train/test split, evaluating with per-class metrics (e.g. macro F1) and considering techniques such as class weights or resampling. No balancing was applied here (analysis only).
 
 ## Feature analysis
 
