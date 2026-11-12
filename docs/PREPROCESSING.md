@@ -6,6 +6,7 @@
 ## Contents
 
 - [Missing values and duplicates](#missing-values-and-duplicates)
+- [Train/validation/test split](#trainvalidationtest-split)
 
 ## Missing values and duplicates
 
@@ -76,4 +77,46 @@ from data_audit import load_raw
 from data_cleaning import clean
 
 df = clean(load_raw())
+```
+
+## Train/validation/test split
+
+Issue #16. Reproduce with: `python src/data_split.py`
+
+### Ratios
+
+| Partition | Share |
+|---|---|
+| Train | 70% |
+| Validation | 15% |
+| Test | 15% |
+
+### Decision
+
+| Topic | Strategy | Reason |
+|---|---|---|
+| Ratios | 70 / 15 / 15 | Standard split. 15% test ≈ 87k rows is enough to reliably measure the rarest class (Cottonwood/Willow, 0.47% ≈ 410 rows in test); 70% train ≈ 406k rows is ample for training. |
+| Stratification | On `Cover_Type` | Preserves the class proportions in every partition. |
+| Seed | `random_state=42` | Reproducible partitions. |
+| Order | Test first, then validation from the remainder | The three partitions never overlap. |
+
+The split happens **before** any fitted step, so it does not leak; `data_split.py`
+fits nothing.
+
+### Verification
+
+`split_train_val_test()` on the cleaned dataset returns 406,708 train /
+87,152 validation / 87,152 test rows (70% / 15% / 15%), and
+`check_stratification()` passes: every partition matches the full class shares
+to within 0.001 percentage points.
+
+### Usage
+
+```python
+from data_audit import load_raw
+from data_cleaning import clean, FEATURES, TARGET
+from data_split import split_train_val_test
+
+df = clean(load_raw())
+X_train, X_val, X_test, y_train, y_val, y_test = split_train_val_test(df[FEATURES], df[TARGET])
 ```
