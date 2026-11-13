@@ -52,17 +52,31 @@ H = `Horizontal_Distance_To_Hydrology`, V = `Vertical_Distance_To_Hydrology`.
 
 1. Clean with `clean()` and split with `split_train_val_test()` (#16). The test
    partition is never used in this branch.
-2. Screening: LightGBM (`random_state=42`), 5-fold stratified CV on the training
-   partition through `evaluate_model()` (#19). Compare the 54 raw features
-   (baseline) with the baseline plus each group, and plus all groups.
+2. Screening: XGBoost (default hyperparameters, `random_state=42`), 5-fold
+   stratified CV on the training partition through `evaluate_model()` (#19).
+   Compare the 54 raw features (baseline) with the baseline plus each group, and
+   plus all groups.
 3. A group is kept if the mean macro F1 improves by at least 0.002 and by more
    than the standard deviation of the baseline folds.
-4. Selection: rank the kept feature set by LightGBM gain importance fitted on
-   the training partition, then compare the full set with the top-k subsets
+4. Selection: rank the kept feature set by XGBoost gain importance fitted on the
+   training partition, then compare the full set with the top-k subsets
    (k = 20, 30, 40) on the validation partition. Keep the smallest subset whose
    validation macro F1 is within 0.001 of the full set.
-5. Confirmation: XGBoost on the final feature set against the baseline (CV on
-   the training partition), to check that the gain is not specific to LightGBM.
+5. Confirmation: repeat the baseline against final set comparison with a
+   different CV seed (7), to check that the result does not depend on one
+   particular fold assignment.
+
+### Screening model
+
+LightGBM with default hyperparameters was tried first and discarded. With the
+same folds, the baseline scored 0.8292, 0.8335, 0.8240, 0.8325 and 0.8111,
+while adding the single group `elevation_offsets` scored 0.8102, 0.8333, 0.7605,
+0.8349 and 0.8391: a change cannot help and hurt that much, so the measurement
+itself was erratic (fold standard deviation up to 0.032, against 0.0027 for
+XGBoost). Its gain importance also ranked `Aspect` first (39%) and `Elevation`
+fifth (2.9%), which contradicts the EDA (eta squared 0.0046 and 0.616). XGBoost
+was stable and its baseline agrees with `docs/MODELING.md`, so it is used for
+screening, ranking and subset comparison.
 
 ### Leakage
 
