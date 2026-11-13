@@ -8,6 +8,7 @@
 - [Missing values and duplicates](#missing-values-and-duplicates)
 - [Train/validation/test split](#trainvalidationtest-split)
 - [Feature scaling](#feature-scaling)
+- [Outliers](#outliers)
 
 ## Missing values and duplicates
 
@@ -223,3 +224,84 @@ pipeline.predict(X_test)
 
 Do not call `fit` or `fit_transform` on the full dataset before splitting.
 Exporting the fitted pipeline for the app is covered by #32.
+
+## Outliers
+
+Issue #13. Reproduce with: `python src/outlier_treatment.py`
+
+### What was checked
+
+Outliers were counted on the 10 numeric features of the **training partition**
+only (the 44 binary indicators cannot have outliers in this sense), with two
+rules: the IQR rule (value beyond Q1 - 1.5*IQR or Q3 + 1.5*IQR) and the z-score
+rule (|z| > 3).
+
+| Feature | IQR count | IQR % | z-score count | z-score % |
+|---|---|---|---|---|
+| Elevation | 10,997 | 2.70 | 4,103 | 1.01 |
+| Aspect | 0 | 0.00 | 0 | 0.00 |
+| Slope | 10,705 | 2.63 | 2,831 | 0.70 |
+| Horizontal_Distance_To_Hydrology | 9,254 | 2.28 | 5,010 | 1.23 |
+| Vertical_Distance_To_Hydrology | 21,982 | 5.41 | 7,101 | 1.75 |
+| Horizontal_Distance_To_Roadways | 460 | 0.11 | 22 | 0.01 |
+| Hillshade_9am | 12,204 | 3.00 | 5,231 | 1.29 |
+| Hillshade_Noon | 11,046 | 2.72 | 4,634 | 1.14 |
+| Hillshade_3pm | 5,475 | 1.35 | 2,131 | 0.52 |
+| Horizontal_Distance_To_Fire_Points | 21,724 | 5.34 | 7,654 | 1.88 |
+
+The IQR rule flags more points than the z-score rule because the features are
+skewed (see `docs/EDA.md`). The heaviest are `Vertical_Distance_To_Hydrology`
+and `Horizontal_Distance_To_Fire_Points` (about 5.4% each); `Aspect` has none.
+
+### Decision
+
+**Clip (winsorize) the numeric features to the training IQR fences. No row is
+removed.** Reasons:
+
+1. **They are legitimate tails, not errors.** The EDA shows these are long tails
+   of skewed distributions; the documentation declares no missing-value code and
+   nothing confirmed them as measurement errors.
+2. **The main models do not need it.** The project's models are tree-based
+   (Random Forest, XGBoost, LightGBM), insensitive to monotonic outliers.
+   Clipping still caps extremes for the linear and distance-based baselines.
+3. **Removal would distort the classes.** Dropping every training row flagged by
+   the IQR rule in any feature would remove **75,308 of 406,708 rows (18.5%)**
+   and shift the per-class shares by up to **2.375 percentage points** (class 1
+   up, class 3 down about 1.8 pp), worsening the already strong imbalance.
+   Clipping removes no row, so the class distribution is preserved exactly.
+
+### Applied and verified
+
+The treatment is a scikit-learn transformer, `OutlierClipper`, wrapped in a
+`ColumnTransformer` (`build_outlier_preprocessor`) that clips the numeric
+features and passes the binary ones through. It learns the clip bounds in `fit`
+from the **training partition only**, so it is leakage-safe and runs before the
+scaler inside a `Pipeline`.
+
+| Check | Result |
+|---|---|
+| Clip bounds equal the training IQR fences and differ from the full-data fences | Pass (`check_no_leakage`) |
+| Numeric values changed (clipped) in training | 103,847 |
+| Values beyond the bounds after clipping | 0 |
+| Rows removed | 0 |
+| Binary features identical before and after | True |
+| Class distribution before vs after | unchanged (1: 36.46%, 2: 48.76%, 3: 6.15%, 4: 0.47%, 5: 1.63%, 6: 2.99%, 7: 3.53%) |
+
+### Usage
+
+```python
+from sklearn.pipeline import Pipeline
+
+from outlier_treatment import build_outlier_preprocessor
+from feature_scaling import build_preprocessor
+
+pipeline = Pipeline([
+    ("outliers", build_outlier_preprocessor()),   # clip, fitted on training data only
+    ("scaler", build_preprocessor()),             # then scale
+    ("model", ...),
+])
+pipeline.fit(X_train, y_train)
+```
+
+Clipping is most useful for linear and distance-based models; for tree-based
+models it can be left out of the pipeline without affecting results.
