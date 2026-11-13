@@ -234,7 +234,7 @@ to keep only those that improve the model. The code lives in
 
 ### Candidate features
 
-Eight groups of candidates (`FEATURE_GROUPS`). Every feature is computed from
+Six groups of candidates (`FEATURE_GROUPS`). Every feature is computed from
 the same row only, so the transformation is stateless.
 
 | Group | New features | Idea |
