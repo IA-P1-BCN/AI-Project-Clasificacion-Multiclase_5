@@ -79,23 +79,84 @@ never predicted (recall 0.0063) and Douglas-fir (6) is missed three times out
 of four. A linear decision boundary and the class imbalance both contribute;
 #17 (imbalance handling) and the non-linear models address them.
 
-## Models comparison
+## Models comparison and shortlist
 
-| Model | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) |
-|---|---|---|---|---|
-| DummyClassifier (most_frequent) | 0.4876 | — | — | 0.0937 |
-| DummyClassifier (stratified) | 0.3770 | — | — | 0.1426 |
-| LogisticRegression | 0.7248 | 0.6042 | 0.5112 | 0.5324 |
-| XGBoost | 0.8690 | 0.8747 | 0.8297 | 0.8494 |
-| LightGBM | 0.8540 | 0.8382 | 0.8098 | 0.8175 |
-| MLP (128, 64) | 0.9035 | 0.8716 | 0.8420 | 0.8557 |
-| RandomForest (100 trees) | 0.9470 | 0.9373 | 0.8918 | 0.9124 |
+Issue #23. Reproduce every model (the MLP CV takes about an hour) with:
+`python src/model_comparison.py`. The fast subset — the gradient-boosted models
+and the baselines — reproduces with:
+`python src/model_comparison.py XGBoost LightGBM "DummyClassifier (most_frequent)" "DummyClassifier (stratified)"`
 
-> Each row uses the protocol and split of its own ticket: `LogisticRegression`
-> is 5-fold CV on the canonical train set of #16, while `XGBoost` / `LightGBM`
-> (#22, see `specs/feature-22-m4-train-ensemble-model-xgboost-lightgbm.md`)
-> and the `DummyClassifier` baselines (#19) use their own splits. #23 will
-> re-evaluate all of them on the same split.
+Every model is evaluated on the **same** canonical train split
+(`split_train_val_test`, #16; 406,708 rows) with the **same** protocol
+(`StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`, macro F1 the main
+metric), so the rows are comparable. `LogisticRegression` (#20),
+`RandomForest` (#21) and `MLP` (#24) were already produced on this split, so
+their numbers are reused; `XGBoost`, `LightGBM` and the `DummyClassifier`
+baselines were re-run here on the canonical split (in #22 / #19 they used a
+different 70% partition). Accuracy and macro F1 are the mean ± standard
+deviation over the five folds; macro precision / recall come from pooled
+out-of-fold predictions.
+
+| Rank | Model | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) |
+|---|---|---|---|---|---|
+| 1 | RandomForest (100 trees) | 0.9470 | 0.9373 | 0.8918 | **0.9124 ± 0.0023** |
+| 2 | MLP (128, 64) | 0.9035 | 0.8716 | 0.8420 | 0.8557 ± 0.0090 |
+| 3 | XGBoost | 0.8693 | 0.8833 | 0.8288 | 0.8514 ± 0.0038 |
+| 4 | LightGBM | 0.8561 | 0.8504 | 0.8122 | 0.8261 ± 0.0082 |
+| 5 | LogisticRegression | 0.7248 | 0.6042 | 0.5112 | 0.5324 ± 0.0037 |
+| — | DummyClassifier (stratified) | 0.3767 | 0.1433 | 0.1433 | 0.1433 ± 0.0013 |
+| — | DummyClassifier (most_frequent) | 0.4876 | 0.0697 | 0.1429 | 0.0937 ± 0.0000 |
+
+### F1 per class (same split and protocol)
+
+| `Cover_Type` | Name | RandomForest | MLP | XGBoost | LightGBM | LogReg |
+|---|---|---|---|---|---|---|
+| 1 | Spruce/Fir | 0.9459 | 0.8987 | 0.8508 | 0.8343 | 0.7047 |
+| 2 | Lodgepole Pine | 0.9551 | 0.9182 | 0.8816 | 0.8705 | 0.7736 |
+| 3 | Ponderosa Pine | 0.9422 | 0.8990 | 0.9046 | 0.8924 | 0.7369 |
+| 4 | Cottonwood/Willow | 0.8687 | 0.8137 | 0.8728 | 0.7817 | 0.5105 |
+| 5 | Aspen | 0.8213 | 0.7312 | 0.6968 | 0.7109 | 0.0123 |
+| 6 | Douglas-fir | 0.8993 | 0.8110 | 0.8270 | 0.8066 | 0.3480 |
+| 7 | Krummholz | 0.9547 | 0.9187 | 0.9266 | 0.9055 | 0.6413 |
+
+### Ranking
+
+1. **Random Forest** is the clear winner: best macro F1 (0.9124), best accuracy
+   (0.9470), the most stable (std 0.0023) and the best or near-best F1 on every
+   class, including the hardest one, Aspen (0.8213).
+2. **MLP** and **XGBoost** are a near tie on macro F1 (0.8557 vs 0.8514, within
+   one standard deviation). The MLP has higher accuracy (+3.4 points) and is
+   stronger on the two majority classes; XGBoost is more stable (std 0.0038 vs
+   0.0090), the best model on the rarest class, Cottonwood/Willow (0.8728), and
+   trains in minutes rather than ~1 hour.
+3. **LightGBM** trails XGBoost in six of the seven classes (it is slightly
+   ahead only on Aspen, 0.7109 vs 0.6968), and **logistic regression**, while
+   far above the baselines, is well behind the non-linear models and barely
+   predicts Aspen (F1 0.0123).
+
+### Shortlist (agreed by the team)
+
+- **Primary — Random Forest:** strongest and most stable model; carry it to
+  tuning (#29) and deployment (#32 / #34).
+- **Secondary — XGBoost:** the more practical of the two near-tied runners-up —
+  stable across folds (std 0.0038 vs the MLP's 0.0090) and trains in minutes
+  rather than ~1 hour, at essentially the same macro F1. On the rarest class,
+  Cottonwood/Willow, it is on par with Random Forest (0.8728 vs 0.8687, within
+  the fold-to-fold noise). The **MLP** is a close alternative if accuracy on the
+  majority classes is prioritized, but it is an order of magnitude slower to
+  train.
+
+Before Random Forest is carried to deployment, two things still need measuring:
+its overfitting gap (#28) — the forest runs without `max_depth`, so the < 5%
+criterion may not hold as is — and the size of the serialized model
+(`.joblib`), which the API loads at start-up and Docker packages (#34). Tuning
+(#29) should also try the eight selected features of #18 on Random Forest; they
+lifted XGBoost in validation but have not been tested on the forest.
+
+> All models are untuned (#29) and use default hyperparameters without class
+> weights (#17), so the ranking may shift after tuning and imbalance handling.
+> Scores are on the train split under cross-validation; final metrics on the
+> validation / test partitions belong to #25.
 
 ## Neural network (MLP)
 
@@ -167,8 +228,10 @@ F1 per class:
 - Caveats: all three models are untuned (#29), and the ensemble scores were
   obtained in #22 on a different 70% train partition of the same size
   (406,708 rows), so differences of a few thousandths are not conclusive.
-  Random Forest (#21) is added below (section *Ensemble model: Random Forest*)
-  and in the *Models comparison* table. The shortlist decision belongs to #23.
+  Random Forest (#21) is added below (section *Ensemble model: Random Forest*).
+  The equal-footing comparison and the shortlist are in *Models comparison and
+  shortlist* (#23), where XGBoost / LightGBM are re-evaluated on the canonical
+  split.
 
 ## Ensemble model: Random Forest
 
