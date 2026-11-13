@@ -28,7 +28,7 @@ model has a simple learned reference to beat in addition to the baseline.
 
 | File | Change |
 |---|---|
-| `src/logistic_regression.py` | New. `build_pipeline()`, `per_class_report(model, X, y)`, `main()`. |
+| `src/logistic_regression.py` | New. `build_pipeline()`, `per_class_report(model, X, y)` (returns the table and the solver iterations per fold), `main()`. |
 | `docs/MODELING.md` | New section *Simple model: Logistic Regression*; one row in *Models comparison*. |
 
 Decisions:
@@ -44,10 +44,16 @@ Decisions:
   untuned reference.
 - **Reuse the protocol.** Accuracy and macro F1 come from
   `baseline.evaluate_model` (#19), unchanged.
-- **Per-class metrics** come from out-of-fold predictions
-  (`cross_val_predict`) over the same `StratifiedKFold(n_splits=5,
-  shuffle=True, random_state=42)`, so every training row is predicted by a
-  model that did not see it.
+- **Per-class metrics** come from out-of-fold predictions (the fold models
+  of `cross_validate(..., return_estimator=True, return_indices=True)`) over
+  the same `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`, so
+  every training row is predicted by a model that did not see it.
+- **Convergence is checked on every fit.** The folds are fitted in worker
+  processes, where a `ConvergenceWarning` does not reach the parent process,
+  so `main()` reads `n_iter_` of each fold's model and of the fit on the full
+  train set, and raises if any of them reaches `max_iter`. The fold models
+  inspected are those of `per_class_report`; `evaluate_model` (#19, unchanged)
+  fits the same pipeline on the same folds.
 - **Canonical split.** The train set comes from
   `data_split.split_train_val_test` (#16). The validation and test sets are
   not touched in this issue.
@@ -71,5 +77,6 @@ python src/logistic_regression.py
 
 Expected: the size of the train set (406,708 rows), accuracy and macro F1 as
 mean ± standard deviation over the 5 folds, a per-class precision / recall /
-F1 table, and the line `Converged: True`. Observed results are recorded in
+F1 table, the solver iterations of the five CV folds and of the fit on the
+full train set, and the line `Converged: True`. Observed results are recorded in
 `docs/MODELING.md`.

@@ -43,7 +43,10 @@ Issue #20. Reproduce with: `python src/logistic_regression.py`
   #16), 406,708 rows. Validation and test sets are not used.
 - **No leakage:** the scaler is a `Pipeline` step, so it is refitted on each
   training fold.
-- **Convergence:** 219 iterations on the full train set, below `max_iter`.
+- **Convergence:** every fit stops below `max_iter`: 223, 233, 269, 240 and
+  234 iterations on the five CV folds, 219 on the full train set. The script
+  reads `n_iter_` of each fold's model and fails if any fit reaches
+  `max_iter`.
 
 ### Cross-validation scores (5 folds)
 
@@ -64,6 +67,10 @@ Issue #20. Reproduce with: `python src/logistic_regression.py`
 | 7 | Krummholz | 0.7262 | 0.5742 | 0.6413 | 14,356 |
 | | Macro average | 0.6042 | 0.5112 | 0.5325 | 406,708 |
 
+The macro F1 of this table (0.5325) is computed once over all out-of-fold
+predictions pooled together, while the one in the cross-validation scores
+(0.5324) is the mean of the five per-fold macro F1 values.
+
 Logistic regression clearly beats both baselines (macro F1 0.5324 against
 0.1426), so the features carry signal that a linear model can use. It is
 stable across folds, but its macro F1 is far below its accuracy: the two
@@ -82,8 +89,11 @@ of four. A linear decision boundary and the class imbalance both contribute;
 | XGBoost | 0.8690 | 0.8747 | 0.8297 | 0.8494 |
 | LightGBM | 0.8540 | 0.8382 | 0.8098 | 0.8175 |
 
-> Values are the mean over 5-fold stratified cross-validation on the training
-> split (see `specs/feature-22-m4-train-ensemble-model-xgboost-lightgbm.md`).
+> Each row uses the protocol and split of its own ticket: `LogisticRegression`
+> is 5-fold CV on the canonical train set of #16, while `XGBoost` / `LightGBM`
+> (#22, see `specs/feature-22-m4-train-ensemble-model-xgboost-lightgbm.md`)
+> and the `DummyClassifier` baselines (#19) use their own splits. #23 will
+> re-evaluate all of them on the same split.
 
 ## Evaluation metrics
 
