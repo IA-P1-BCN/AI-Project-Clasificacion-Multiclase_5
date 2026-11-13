@@ -167,8 +167,8 @@ F1 per class:
 - Caveats: all three models are untuned (#29), and the ensemble scores were
   obtained in #22 on a different 70% train partition of the same size
   (406,708 rows), so differences of a few thousandths are not conclusive.
-  Random Forest (#21) is not merged yet and is not compared. The shortlist
-  decision belongs to #23.
+  Random Forest (#21) is added below (section *Ensemble model: Random Forest*)
+  and in the *Models comparison* table. The shortlist decision belongs to #23.
 
 ## Ensemble model: Random Forest
 
@@ -235,8 +235,13 @@ will address.
 
 `Elevation` dominates (0.24), consistent with the EDA (most discriminative
 feature, eta squared 0.616). The distance features follow. The top 10 are all
-numeric; the one-hot `Wilderness_Area` and `Soil_Type` indicators each carry
-little impurity decrease individually, though as groups they still matter.
+numeric, but this partly reflects a known bias of impurity-based importance
+(MDI): it favours continuous, high-cardinality features over binary ones, so
+the low individual scores of the one-hot `Wilderness_Area` and `Soil_Type`
+indicators understate their role rather than measure it. A permutation
+importance, or a gain-based importance (as explored in #18, where `Soil_Type`
+columns rank highly), would order them differently; #23 can revisit this on the
+shared split.
 
 ## Evaluation metrics
 
