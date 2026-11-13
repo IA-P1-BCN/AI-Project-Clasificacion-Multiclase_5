@@ -34,6 +34,7 @@ Supervised **multiclass classification** — each instance is assigned to exactl
 
 - **Dataset:** Forest Cover Type (Covertype) — Roosevelt National Forest, Colorado, USA (US Forest Service / UCI Machine Learning Repository).
 - **Selection:** chosen over Wine and Dry Bean for its size, class imbalance and mixed feature types; see [docs/DATASET_SELECTION.md](docs/DATASET_SELECTION.md).
+- **Data dictionary:** every column (type, unit, range, meaning) and the target classes are documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
 - **Source & version:** to be documented on download (see M1).
 
 ## 4. Functional requirements
