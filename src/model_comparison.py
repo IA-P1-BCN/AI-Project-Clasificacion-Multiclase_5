@@ -18,7 +18,7 @@ Run every model (slow: the MLP CV takes about an hour):
 
 Run a subset by name (XGBoost / LightGBM / the dummies are fast):
 
-    python src/model_comparison.py XGBoost LightGBM DummyMostFrequent DummyStratified
+    python src/model_comparison.py XGBoost LightGBM "DummyClassifier (most_frequent)" "DummyClassifier (stratified)"
 """
 import sys
 

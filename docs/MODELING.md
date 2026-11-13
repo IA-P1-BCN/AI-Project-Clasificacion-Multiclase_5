@@ -129,19 +129,29 @@ out-of-fold predictions.
    stronger on the two majority classes; XGBoost is more stable (std 0.0038 vs
    0.0090), the best model on the rarest class, Cottonwood/Willow (0.8728), and
    trains in minutes rather than ~1 hour.
-3. **LightGBM** trails XGBoost on every class, and **logistic regression**,
-   while far above the baselines, is well behind the non-linear models and
-   barely predicts Aspen (F1 0.0123).
+3. **LightGBM** trails XGBoost in six of the seven classes (it is slightly
+   ahead only on Aspen, 0.7109 vs 0.6968), and **logistic regression**, while
+   far above the baselines, is well behind the non-linear models and barely
+   predicts Aspen (F1 0.0123).
 
 ### Shortlist (proposed, pending team sign-off)
 
 - **Primary — Random Forest:** strongest and most stable model; carry it to
   tuning (#29) and deployment (#32 / #34).
-- **Secondary — XGBoost:** the stronger of the two near-tied runners-up as a
-  second candidate — cheap and fast to tune, stable across folds, best on the
-  rare classes, with more tuning headroom than a bagging forest. The **MLP** is
-  a close alternative if accuracy on the majority classes is prioritized, but it
-  is an order of magnitude slower to train.
+- **Secondary — XGBoost:** the more practical of the two near-tied runners-up —
+  stable across folds (std 0.0038 vs the MLP's 0.0090) and trains in minutes
+  rather than ~1 hour, at essentially the same macro F1. On the rarest class,
+  Cottonwood/Willow, it is on par with Random Forest (0.8728 vs 0.8687, within
+  the fold-to-fold noise). The **MLP** is a close alternative if accuracy on the
+  majority classes is prioritized, but it is an order of magnitude slower to
+  train.
+
+Before Random Forest is carried to deployment, two things still need measuring:
+its overfitting gap (#28) — the forest runs without `max_depth`, so the < 5%
+criterion may not hold as is — and the size of the serialized model
+(`.joblib`), which the API loads at start-up and Docker packages (#34). Tuning
+(#29) should also try the eight selected features of #18 on Random Forest; they
+lifted XGBoost in validation but have not been tested on the forest.
 
 > All models are untuned (#29) and use default hyperparameters without class
 > weights (#17), so the ranking may shift after tuning and imbalance handling.
