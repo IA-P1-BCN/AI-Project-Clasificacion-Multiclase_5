@@ -36,7 +36,8 @@ Covertype's 44 binary features are 4 `Wilderness_Area` indicators and 40
   Cottonwood/Willow 0.47% vs. majority Lodgepole Pine 48.76%, about 1:103). This
   is the most valuable property for the project: it forces stratified splits,
   macro F1 and per-class metrics instead of plain accuracy, and makes resampling
-  and class weighting meaningful. Wine and Dry Bean are close to balanced and
+  and class weighting meaningful. Wine is near balanced and Dry Bean only
+  moderately imbalanced (~1:7), both far from Covertype's ~1:103, so either
   would make the task too easy for the target delivery level.
 - **Feature types.** The mix of 10 quantitative numeric features and 44 binary
   one-hot features requires a proper `ColumnTransformer` / `Pipeline` that scales
@@ -65,9 +66,10 @@ The numbers above come from each dataset's UCI page:
 - Dry Bean: <https://archive.ics.uci.edu/dataset/602/dry+bean+dataset>
 - Forest Cover Type (Covertype): <https://archive.ics.uci.edu/dataset/31/covertype>
 
-Covertype's shape and class shares are verified locally once the raw file is in
-place:
+Covertype's shape is audited and its class shares are reported locally once the
+raw file is in place:
 
 ```bash
-python src/data_audit.py
+python src/data_audit.py          # rows, columns, dtypes, nulls, duplicates
+python src/class_distribution.py  # per-class counts, percentages, imbalance ratio
 ```
