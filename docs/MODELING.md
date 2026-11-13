@@ -134,7 +134,7 @@ out-of-fold predictions.
    far above the baselines, is well behind the non-linear models and barely
    predicts Aspen (F1 0.0123).
 
-### Shortlist (proposed, pending team sign-off)
+### Shortlist (agreed by the team)
 
 - **Primary — Random Forest:** strongest and most stable model; carry it to
   tuning (#29) and deployment (#32 / #34).

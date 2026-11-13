@@ -72,7 +72,7 @@ Decisions:
 - [x] Rank models
 - [x] Shortlist 1-2 candidates for tuning/deployment
 - [x] Comparison table filled in `docs/MODELING.md`
-- [ ] Shortlist agreed by the team (proposed here; needs team sign-off)
+- [x] Shortlist agreed by the team
 
 ## Verification
 
@@ -104,5 +104,5 @@ the other rows are reused from #20 / #21 / #24 (already on this split).
 | 4 | LightGBM | 0.8561 | 0.8261 ± 0.0082 |
 | 5 | LogisticRegression | 0.7248 | 0.5324 ± 0.0037 |
 
-Proposed shortlist: **Random Forest** (primary) and **XGBoost** (secondary; the
-MLP is a close alternative but ~10x slower to train). Pending team sign-off.
+Shortlist agreed by the team: **Random Forest** (primary) and **XGBoost**
+(secondary; the MLP is a close alternative but ~10x slower to train).
