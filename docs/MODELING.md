@@ -89,6 +89,7 @@ of four. A linear decision boundary and the class imbalance both contribute;
 | XGBoost | 0.8690 | 0.8747 | 0.8297 | 0.8494 |
 | LightGBM | 0.8540 | 0.8382 | 0.8098 | 0.8175 |
 | MLP (128, 64) | 0.9035 | 0.8716 | 0.8420 | 0.8557 |
+| RandomForest (100 trees) | 0.9470 | 0.9373 | 0.8918 | 0.9124 |
 
 > Each row uses the protocol and split of its own ticket: `LogisticRegression`
 > is 5-fold CV on the canonical train set of #16, while `XGBoost` / `LightGBM`
@@ -168,6 +169,74 @@ F1 per class:
   (406,708 rows), so differences of a few thousandths are not conclusive.
   Random Forest (#21) is not merged yet and is not compared. The shortlist
   decision belongs to #23.
+
+## Ensemble model: Random Forest
+
+Issue #21. Reproduce with: `python src/random_forest.py` (about ten minutes on
+8 CPU cores).
+
+- **Model:** `RandomForestClassifier(n_estimators=100, random_state=42,
+  n_jobs=-1)` with default hyperparameters (Gini impurity, no depth limit,
+  bootstrap sampling, `sqrt` features per split). A bagging ensemble to set
+  against the gradient-boosted ones (#22).
+- **No scaling / no preprocessor:** a Random Forest splits on thresholds, so
+  rescaling the numeric features has no effect; the model trains on the raw
+  (cleaned) `FEATURES`. The forest is the only thing learned from data, and the
+  CV routines refit it on each training fold, so there is no leakage.
+- **Data:** the train set of the canonical split (`split_train_val_test`, #16),
+  406,708 rows. Validation and test sets are not used.
+- **Default hyperparameters.** Tuning belongs to #29 and class weights to #17;
+  this issue records the untuned reference.
+- **Reuse the protocol.** Accuracy and macro F1 come from
+  `baseline.evaluate_model` (#19); per-class metrics come from out-of-fold
+  predictions (`cross_val_predict`) over the same
+  `StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`.
+
+### Cross-validation scores (5 folds)
+
+| Model | Accuracy | Macro F1 |
+|---|---|---|
+| RandomForest (100 trees) | 0.9470 ± 0.0006 | 0.9124 ± 0.0023 |
+
+### Per-class metrics (out-of-fold predictions on the train set)
+
+| `Cover_Type` | Name | Precision | Recall | F1 | Support |
+|---|---|---|---|---|---|
+| 1 | Spruce/Fir | 0.9577 | 0.9344 | 0.9459 | 148,288 |
+| 2 | Lodgepole Pine | 0.9420 | 0.9686 | 0.9551 | 198,311 |
+| 3 | Ponderosa Pine | 0.9307 | 0.9539 | 0.9422 | 25,028 |
+| 4 | Cottonwood/Willow | 0.9058 | 0.8346 | 0.8687 | 1,923 |
+| 5 | Aspen | 0.9317 | 0.7344 | 0.8213 | 6,645 |
+| 6 | Douglas-fir | 0.9214 | 0.8782 | 0.8993 | 12,157 |
+| 7 | Krummholz | 0.9717 | 0.9383 | 0.9547 | 14,356 |
+| | Macro average | 0.9373 | 0.8918 | 0.9125 | 406,708 |
+
+Random Forest is the strongest model so far on both accuracy (0.9470) and macro
+F1 (0.9124), ahead of the MLP (0.9035 / 0.8557) and XGBoost (0.8690 / 0.8494),
+and it is very stable across folds (macro F1 std 0.0023). The imbalance still
+shows: Aspen (5) has the lowest recall (0.7344) despite high precision, so the
+forest predicts it conservatively — the classic minority-class pattern that #17
+will address.
+
+### Feature importance (mean decrease in impurity, full train set)
+
+| Rank | Feature | Importance |
+|---|---|---|
+| 1 | `Elevation` | 0.2415 |
+| 2 | `Horizontal_Distance_To_Roadways` | 0.1176 |
+| 3 | `Horizontal_Distance_To_Fire_Points` | 0.1094 |
+| 4 | `Horizontal_Distance_To_Hydrology` | 0.0606 |
+| 5 | `Vertical_Distance_To_Hydrology` | 0.0578 |
+| 6 | `Aspect` | 0.0481 |
+| 7 | `Hillshade_Noon` | 0.0433 |
+| 8 | `Hillshade_9am` | 0.0414 |
+| 9 | `Hillshade_3pm` | 0.0411 |
+| 10 | `Slope` | 0.0333 |
+
+`Elevation` dominates (0.24), consistent with the EDA (most discriminative
+feature, eta squared 0.616). The distance features follow. The top 10 are all
+numeric; the one-hot `Wilderness_Area` and `Soil_Type` indicators each carry
+little impurity decrease individually, though as groups they still matter.
 
 ## Evaluation metrics
 
