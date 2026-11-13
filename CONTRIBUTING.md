@@ -66,3 +66,16 @@ chore(docker): add Dockerfile and docker-compose
 
 Keep the subject line under ~72 characters and write it in the imperative
 ("add", not "added"/"adds").
+
+## Continuous integration
+
+Every pull request into `develop` or `main`, and every push to those branches,
+runs `.github/workflows/ci.yml` (#41):
+
+- **Install, imports and tests:** installs `requirements.txt` on the Python
+  version of `.python-version`, imports every module of `src/` and `app/`, and
+  runs `pytest` once a `tests/` folder exists.
+- **Docker build:** builds the image without pushing it.
+
+The result appears as checks at the bottom of the pull request. Run the import
+check locally with `python scripts/check_imports.py`.
