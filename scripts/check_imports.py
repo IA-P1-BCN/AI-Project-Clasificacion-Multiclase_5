@@ -29,7 +29,8 @@ def module_names() -> list[str]:
 
 def main() -> int:
     failures = []
-    for name in module_names():
+    names = module_names()
+    for name in names:
         try:
             importlib.import_module(name)
             print(f"ok    {name}")
@@ -40,7 +41,7 @@ def main() -> int:
     if failures:
         print(f"\n{len(failures)} module(s) failed to import: {', '.join(failures)}")
         return 1
-    print(f"\nAll {len(module_names())} modules import correctly.")
+    print(f"\nAll {len(names)} modules import correctly.")
     return 0
 
 
