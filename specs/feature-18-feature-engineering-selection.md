@@ -65,6 +65,10 @@ H = `Horizontal_Distance_To_Hydrology`, V = `Vertical_Distance_To_Hydrology`.
 5. Confirmation: repeat the baseline against final set comparison with a
    different CV seed (7), to check that the result does not depend on one
    particular fold assignment.
+6. Held-out check: fit the baseline and the final set on the training
+   partition and score both on the validation partition, overall and per
+   class. The groups were chosen with CV on the training partition, so this
+   is an independent measurement of their impact.
 
 ### Screening model
 
@@ -86,12 +90,12 @@ validation partition, and the test partition is untouched (skill `leakage-check`
 
 ## Acceptance criteria
 
-- [ ] Feature engineering documented with impact (only if time allows)
-- [ ] Candidate features generated (interactions, ratios) from the groups above
-- [ ] Feature importance / selection evaluated on training data only
-- [ ] Only features that help are kept, with the decision rule applied and recorded
-- [ ] Before/after macro F1 table in `docs/PREPROCESSING.md`, with the reproduction command
-- [ ] `leakage-check` passed; the test partition is not used
+- [x] Feature engineering documented with impact (only if time allows)
+- [x] Candidate features generated (interactions, ratios) from the groups above
+- [x] Feature importance / selection evaluated on training data only
+- [x] Only features that help are kept, with the decision rule applied and recorded
+- [x] Before/after macro F1 table in `docs/PREPROCESSING.md`, with the reproduction command
+- [x] `leakage-check` passed; the test partition is not used
 
 ## Verification
 

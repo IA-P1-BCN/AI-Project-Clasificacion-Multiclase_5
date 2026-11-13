@@ -8,6 +8,7 @@
 - [Missing values and duplicates](#missing-values-and-duplicates)
 - [Train/validation/test split](#trainvalidationtest-split)
 - [Feature scaling](#feature-scaling)
+- [Feature engineering and selection](#feature-engineering-and-selection)
 
 ## Missing values and duplicates
 
@@ -223,3 +224,158 @@ pipeline.predict(X_test)
 
 Do not call `fit` or `fit_transform` on the full dataset before splitting.
 Exporting the fitted pipeline for the app is covered by #32.
+
+## Feature engineering and selection
+
+Ticket #18 (optional). Candidate features were generated, ranked and screened
+to keep only those that improve the model. The code lives in
+`src/feature_engineering.py`; the protocol and decision rules were fixed in
+`specs/feature-18-feature-engineering-selection.md` before looking at results.
+
+### Candidate features
+
+Eight groups of candidates (`FEATURE_GROUPS`). Every feature is computed from
+the same row only, so the transformation is stateless.
+
+| Group | New features | Idea |
+|---|---|---|
+| `aspect_circular` | `Aspect_sin`, `Aspect_cos` | Aspect is an angle (0 and 360 are the same direction) |
+| `hydrology_distance` | `Hydrology_Euclidean` | Straight-line distance to water from the horizontal and vertical components |
+| `hydrology_ratio` | `Hydrology_Slope_Ratio` | Vertical over horizontal distance to water (+1 avoids division by zero) |
+| `elevation_offsets` | `Elevation_minus_VDH`, `Elevation_minus_HDH` | Elevation minus the vertical / horizontal distance to water |
+| `distance_combinations` | 6 features | Sum and absolute difference of each pair among hydrology, roadways and fire-point distances |
+| `category_ids` | `Wilderness_Area_id`, `Soil_Type_id` | One-hot columns collapsed into a single category id (0 if not exactly one is active) |
+
+### Method
+
+The model used for screening and ranking is XGBoost (the stable one in
+`docs/MODELING.md`). All figures below use the training partition only, except
+the held-out check, which uses the validation partition. The test partition is
+not touched.
+
+1. **Screening.** Baseline (54 features) against baseline plus one group,
+   5-fold stratified CV on train (seed 42). A group is kept if its mean macro F1
+   gain is at least 0.002 **and** larger than the baseline standard deviation.
+2. **Importance.** Gain importance of an XGBoost fitted on train.
+3. **Subsets.** Top-k features by importance (k = 20, 30, 40) against the full set, fitted on train and scored on validation. The smallest subset within 0.001 macro F1 of the full set would be chosen.
+4. **Confirmation.** Same baseline vs final comparison with another CV seed (7).
+5. **Held-out check.** Baseline and final set fitted on train and scored on validation, overall and per class.
+
+### Results
+
+Screening (5-fold CV, train):
+
+| Configuration | Features | Accuracy | Macro F1 | Std | Gain | Kept |
+|---|---|---|---|---|---|---|
+| baseline | 54 | 0.8692 | 0.8489 | 0.0027 | - | - |
+| `aspect_circular` | 56 | 0.8687 | 0.8485 | 0.0013 | -0.0004 | no |
+| `hydrology_distance` | 55 | 0.8687 | 0.8470 | 0.0025 | -0.0018 | no |
+| `hydrology_ratio` | 55 | 0.8692 | 0.8501 | 0.0017 | +0.0013 | no |
+| `elevation_offsets` | 56 | 0.8796 | 0.8640 | 0.0019 | +0.0151 | **yes** |
+| `distance_combinations` | 60 | 0.8907 | 0.8771 | 0.0042 | +0.0282 | **yes** |
+| `category_ids` | 56 | 0.8706 | 0.8515 | 0.0019 | +0.0027 | no |
+| all groups | 68 | 0.9004 | 0.8877 | 0.0060 | +0.0389 | - |
+
+`category_ids` was borderline: its gain (0.0027) equals the baseline standard
+deviation (0.0027), so the pre-set rule left it out.
+
+Subsets by importance (fit on train, scored on validation):
+
+| Features | Accuracy | Macro F1 |
+|---|---|---|
+| 20 | 0.8199 | 0.7582 |
+| 30 | 0.8744 | 0.8420 |
+| 40 | 0.8882 | 0.8734 |
+| 62 (all) | 0.8956 | 0.8817 |
+
+Removing features lowers macro F1 in every case, so **no original feature is
+dropped**. Only one feature has zero gain.
+
+Confirmation with CV seed 7:
+
+| Configuration | Features | Accuracy | Macro F1 | Std | Gain |
+|---|---|---|---|---|---|
+| baseline | 54 | 0.8685 | 0.8478 | 0.0021 | - |
+| final set | 62 | 0.8975 | 0.8865 | 0.0025 | +0.0387 |
+
+Held-out check (fit on train, scored on validation):
+
+| Configuration | Features | Accuracy | Macro F1 | Gain |
+|---|---|---|---|---|
+| baseline | 54 | 0.8670 | 0.8520 | - |
+| final set | 62 | 0.8956 | 0.8817 | +0.0297 |
+
+F1 per class (`Cover_Type`) on validation:
+
+| Class | Baseline | Final set | Gain |
+|---|---|---|---|
+| 1 | 0.8474 | 0.8790 | +0.0316 |
+| 2 | 0.8793 | 0.9049 | +0.0255 |
+| 3 | 0.9037 | 0.9281 | +0.0244 |
+| 4 | 0.8639 | 0.8589 | -0.0050 |
+| 5 | 0.7225 | 0.7788 | +0.0563 |
+| 6 | 0.8175 | 0.8703 | +0.0528 |
+| 7 | 0.9295 | 0.9517 | +0.0222 |
+
+### Decision
+
+Keep `elevation_offsets` and `distance_combinations` (8 new features, 62 in
+total). Discard the other four groups and do not drop any original feature.
+`SELECTED_GROUPS` in `src/feature_engineering.py` holds this choice.
+
+- The gain is +0.0387 macro F1 in CV with a different seed and +0.0297 on the
+  validation partition, which did not take part in choosing the groups.
+- Six of seven classes improve, the most on the minority classes 5 and 6.
+  Class 4 gets slightly worse (-0.0050); this was not investigated.
+- The two kept groups together (+0.0387) gain less than the sum of their
+  separate gains (0.0151 + 0.0282), so they partly carry the same information.
+
+Interpretation, not tested: tree models split on one feature at a time, so
+sums and differences of distances are hard for them to build; that would
+explain why these two groups help. That removing low-importance features hurts
+suggests that rare soil types matter for the minority classes.
+
+### LightGBM was discarded for screening
+
+LightGBM with default settings gave erratic results on this data: macro F1 per
+fold varied widely and the feature importance was not plausible, so it could
+not rank candidates reliably. XGBoost was stable (std 0.0013 to 0.0060 per
+configuration) and was used instead. This is a limit of the default settings;
+tuning is out of scope here and belongs to M4.
+
+### No data leakage
+
+- Features are stateless and row-wise: no statistic is estimated from data, so
+  nothing can leak between partitions.
+- The importance ranking is fitted on the training partition only.
+- The validation partition is used only to score subsets and for the held-out
+  check, never to fit.
+- The test partition is not used. It stays untouched until M5.
+
+### Reproducibility and versions
+
+```powershell
+python src/feature_engineering.py
+```
+
+It takes about 10 minutes. The experiment ran with scikit-learn 1.9.1,
+xgboost 3.4.1 and pandas 3.1.1, which are newer than the pinned versions in
+`requirements.txt`; rerunning with the pinned versions may change the
+decimals. Two runs with the same versions gave identical numbers. No new
+dependencies were added.
+
+### Usage
+
+```python
+from sklearn.pipeline import Pipeline
+
+from src.feature_engineering import SELECTED_GROUPS, build_feature_engineer
+
+pipeline = Pipeline([
+    ("features", build_feature_engineer(SELECTED_GROUPS)),
+    ("model", model),
+])
+```
+
+The new features are not scaled. For linear models place the scaler from
+#14 after this step. Exporting the pipeline for the app is covered by #32.
