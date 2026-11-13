@@ -106,6 +106,7 @@ The dataset is **not** stored in the repository (`data/raw/` is git-ignored). Af
 
 Check that everything is in place with `python src/data_audit.py`.
 
+Why this dataset was chosen over Wine and Dry Bean is explained in [docs/DATASET_SELECTION.md](docs/DATASET_SELECTION.md). Source, version, file size and checksum are documented in [data/README.md](data/README.md).
 Every column (type, unit, range and meaning) is documented in [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md). Source, version, file size and checksum are documented in [data/README.md](data/README.md).
 
 ### Local development without Docker (optional)

@@ -8,6 +8,8 @@
 - [Missing values and duplicates](#missing-values-and-duplicates)
 - [Train/validation/test split](#trainvalidationtest-split)
 - [Feature scaling](#feature-scaling)
+- [Outliers](#outliers)
+- [Target encoding](#target-encoding)
 - [Feature engineering and selection](#feature-engineering-and-selection)
 
 ## Missing values and duplicates
@@ -225,6 +227,137 @@ pipeline.predict(X_test)
 Do not call `fit` or `fit_transform` on the full dataset before splitting.
 Exporting the fitted pipeline for the app is covered by #32.
 
+## Outliers
+
+Issue #13. Reproduce with: `python src/outlier_treatment.py`
+
+### What was checked
+
+Outliers were counted on the 10 numeric features of the **training partition**
+only (the 44 binary indicators cannot have outliers in this sense), with two
+rules: the IQR rule (value beyond Q1 - 1.5*IQR or Q3 + 1.5*IQR) and the z-score
+rule (|z| > 3).
+
+| Feature | IQR count | IQR % | z-score count | z-score % |
+|---|---|---|---|---|
+| Elevation | 10,997 | 2.70 | 4,103 | 1.01 |
+| Aspect | 0 | 0.00 | 0 | 0.00 |
+| Slope | 10,705 | 2.63 | 2,831 | 0.70 |
+| Horizontal_Distance_To_Hydrology | 9,254 | 2.28 | 5,010 | 1.23 |
+| Vertical_Distance_To_Hydrology | 21,982 | 5.41 | 7,101 | 1.75 |
+| Horizontal_Distance_To_Roadways | 460 | 0.11 | 22 | 0.01 |
+| Hillshade_9am | 12,204 | 3.00 | 5,231 | 1.29 |
+| Hillshade_Noon | 11,046 | 2.72 | 4,634 | 1.14 |
+| Hillshade_3pm | 5,475 | 1.35 | 2,131 | 0.52 |
+| Horizontal_Distance_To_Fire_Points | 21,724 | 5.34 | 7,654 | 1.88 |
+
+The IQR rule flags more points than the z-score rule because the features are
+skewed (see `docs/EDA.md`). The heaviest are `Vertical_Distance_To_Hydrology`
+and `Horizontal_Distance_To_Fire_Points` (about 5.4% each); `Aspect` has none.
+
+### Decision
+
+**Clip (winsorize) the numeric features to the training IQR fences. No row is
+removed.** Reasons:
+
+1. **They are legitimate tails, not errors.** The EDA shows these are long tails
+   of skewed distributions; the documentation declares no missing-value code and
+   nothing confirmed them as measurement errors.
+2. **The main models do not need it.** The project's models are tree-based
+   (Random Forest, XGBoost, LightGBM), insensitive to monotonic outliers.
+   Clipping still caps extremes for the linear and distance-based baselines.
+3. **Removal would distort the classes.** Dropping every training row flagged by
+   the IQR rule in any feature would remove **75,308 of 406,708 rows (18.5%)**
+   and shift the per-class shares by up to **2.375 percentage points** (class 1
+   up, class 3 down about 1.8 pp), worsening the already strong imbalance.
+   Clipping removes no row, so the class distribution is preserved exactly.
+
+### Applied and verified
+
+The treatment is a scikit-learn transformer, `OutlierClipper`, wrapped in a
+`ColumnTransformer` (`build_outlier_preprocessor`) that clips the numeric
+features and passes the binary ones through. It learns the clip bounds in `fit`
+from the **training partition only**, so it is leakage-safe and runs before the
+scaler inside a `Pipeline`.
+
+| Check | Result |
+|---|---|
+| Clip bounds equal the training IQR fences and differ from the full-data fences | Pass (`check_no_leakage`) |
+| Numeric values changed (clipped) in training | 103,847 |
+| Values beyond the bounds after clipping | 0 |
+| Rows removed | 0 |
+| Binary features identical before and after | True |
+| Class distribution before vs after | unchanged (1: 36.46%, 2: 48.76%, 3: 6.15%, 4: 0.47%, 5: 1.63%, 6: 2.99%, 7: 3.53%) |
+
+### Usage
+
+```python
+from sklearn.pipeline import Pipeline
+
+from outlier_treatment import build_outlier_preprocessor
+from feature_scaling import build_preprocessor
+
+pipeline = Pipeline([
+    ("outliers", build_outlier_preprocessor()),   # clip, fitted on training data only
+    ("scaler", build_preprocessor()),             # then scale
+    ("model", ...),
+])
+pipeline.fit(X_train, y_train)
+```
+
+Clipping is most useful for linear and distance-based models; for tree-based
+models it can be left out of the pipeline without affecting results.
+
+## Target encoding
+
+Issue #15. Reproduce with: `python src/target_encoding.py`
+
+### What is encoded
+
+The target `Cover_Type` has seven labels (1-7). They are mapped to 0-indexed
+labels (0-6) because XGBoost and LightGBM require 0-indexed classes, and the
+label -> class-name mapping is saved so the app can turn a numeric prediction
+back into a human-readable cover type.
+
+| Encoded | `Cover_Type` | Name | Rows | Share |
+|---|---|---|---|---|
+| 0 | 1 | Spruce/Fir | 211,840 | 36.46% |
+| 1 | 2 | Lodgepole Pine | 283,301 | 48.76% |
+| 2 | 3 | Ponderosa Pine | 35,754 | 6.15% |
+| 3 | 4 | Cottonwood/Willow | 2,747 | 0.47% |
+| 4 | 5 | Aspen | 9,493 | 1.63% |
+| 5 | 6 | Douglas-fir | 17,367 | 2.99% |
+| 6 | 7 | Krummholz | 20,510 | 3.53% |
+
+### Decision
+
+| Topic | Strategy | Reason |
+|---|---|---|
+| Encoding | Fixed shift `encoded = Cover_Type - 1` | The class set is fixed by the ontology, so the mapping is deterministic and needs no fitting. Matches the `y - 1` used in `src/gradient_boosting.py` and the 0-indexed labels the gradient-boosting models require. |
+| Leakage | None possible | Nothing is learned from data; there is no fit step, so train/validation/test labels are encoded identically. |
+| Mapping artifact | `models/label_mapping.json`, regenerated by the module | Static reference data for the app, not a trained model. Like every artifact it is git-ignored. |
+| Unknown labels | `encode_target()` / `decode_target()` raise | An unexpected class fails loudly instead of producing a silent off-by-one. |
+
+### Verification
+
+`check_encoding()` on the cleaned dataset passes: the seven labels map to 0-6,
+`decode_target(encode_target(y))` returns the original labels, and all seven
+classes are present. `models/label_mapping.json` is written with seven entries.
+
+### Usage
+
+```python
+from data_audit import load_raw
+from data_cleaning import clean, TARGET
+from target_encoding import encode_target, decode_target, load_mapping
+
+y = clean(load_raw())[TARGET]
+y_encoded = encode_target(y)          # 1-7 -> 0-6, for training/inference
+cover_type = decode_target(y_pred)    # 0-6 -> 1-7, for reporting
+
+mapping = load_mapping()              # app: encoded label -> Cover_Type + name
+```
+
 ## Feature engineering and selection
 
 Ticket #18 (optional). Candidate features were generated, ranked and screened
@@ -377,5 +510,14 @@ pipeline = Pipeline([
 ])
 ```
 
-The new features are not scaled. For linear models place the scaler from
-#14 after this step. Exporting the pipeline for the app is covered by #32.
+The new features are computed from the raw (unclipped, unscaled) values, which
+is how they were measured. This is enough for the tree-based models.
+
+Do not place `build_preprocessor` (#14) or `build_outlier_preprocessor` (#13)
+after this step: both are `ColumnTransformer`s with `remainder="drop"` that
+keep only the 54 original columns, so they would silently drop the engineered
+features (checked: 62 columns in, 54 out). Using these features with a linear
+model or a neural network requires extending those preprocessors first; that
+is not part of this ticket. The label shift `y - 1` used for XGBoost is the
+same one as `encode_target` (#15). Exporting the pipeline for the app is
+covered by #32.
