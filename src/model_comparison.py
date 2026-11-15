@@ -57,11 +57,11 @@ class LabelOffsetClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, estimator):
         self.estimator = estimator
 
-    def fit(self, X, y):
+    def fit(self, X, y, sample_weight=None):
         y = np.asarray(y)
         self.offset_ = int(y.min())
         self.estimator_ = clone(self.estimator)
-        self.estimator_.fit(X, y - self.offset_)
+        self.estimator_.fit(X, y - self.offset_, sample_weight=sample_weight)
         self.classes_ = self.estimator_.classes_ + self.offset_
         return self
 
