@@ -11,6 +11,7 @@
 - [Outliers](#outliers)
 - [Target encoding](#target-encoding)
 - [Feature engineering and selection](#feature-engineering-and-selection)
+- [Imbalance handling](#imbalance-handling)
 
 ## Missing values and duplicates
 
@@ -521,3 +522,99 @@ model or a neural network requires extending those preprocessors first; that
 is not part of this ticket. The label shift `y - 1` used for XGBoost is the
 same one as `encode_target` (#15). Exporting the pipeline for the app is
 covered by #32.
+
+## Imbalance handling
+
+Issue #17. Reproduce with: `python src/imbalance_handling.py`
+
+### Why it was checked
+
+`Cover_Type` is strongly imbalanced (min/max ratio about 1:103; the rarest
+class, Cottonwood/Willow, is 0.47% of rows). Accuracy is misleading on such
+data — the `most_frequent` baseline reaches 0.4876 accuracy but only 0.0937
+macro F1 (see `docs/MODELING.md`). The main metric is macro F1, which weights
+every class equally, so the minority classes must not be ignored.
+
+### What was tried
+
+Inverse-frequency ("balanced") class weights, computed with
+`sklearn.utils.class_weight.compute_class_weight`, applied only at fit time on
+the training fold via `sample_weight`. The alternative, SMOTE, was rejected up
+front: it adds the `imbalanced-learn` dependency and generates synthetic
+minority samples that can overfit tree models.
+
+| Class | Share | Balanced weight |
+|---|---|---|
+| 1 | 36.46% | 0.3918 |
+| 2 | 48.76% | 0.2930 |
+| 3 | 6.15% | 2.3214 |
+| 4 | 0.47% | 30.2138 |
+| 5 | 1.63% | 8.7436 |
+| 6 | 2.99% | 4.7792 |
+| 7 | 3.53% | 4.0472 |
+
+### Results (5-fold CV on the training partition, default vs weighted)
+
+Random Forest:
+
+| Metric | Default | Weighted |
+|---|---|---|
+| Accuracy | 0.9469 ± 0.0012 | 0.9361 ± 0.0004 |
+| Precision (macro) | 0.9377 ± 0.0024 | 0.8984 ± 0.0015 |
+| Recall (macro) | 0.8912 ± 0.0033 | 0.9239 ± 0.0016 |
+| F1 (macro) | 0.9123 ± 0.0029 | 0.9103 ± 0.0011 |
+| F1 class 4 (Cottonwood/Willow) | 0.8728 | 0.8745 |
+| F1 class 5 (Aspen) | 0.8189 | 0.8512 |
+| F1 class 6 (Douglas-fir) | 0.8966 | 0.8830 |
+| F1 class 7 (Krummholz) | 0.9551 | 0.9512 |
+
+XGBoost:
+
+| Metric | Default | Weighted |
+|---|---|---|
+| Accuracy | 0.8692 ± 0.0020 | 0.8315 ± 0.0010 |
+| Precision (macro) | 0.8747 ± 0.0032 | 0.7448 ± 0.0036 |
+| Recall (macro) | 0.8289 ± 0.0026 | 0.9055 ± 0.0011 |
+| F1 (macro) | 0.8489 ± 0.0027 | 0.8005 ± 0.0021 |
+| F1 class 4 (Cottonwood/Willow) | 0.8501 | 0.8624 |
+| F1 class 5 (Aspen) | 0.7254 | 0.5339 |
+| F1 class 6 (Douglas-fir) | 0.8105 | 0.7816 |
+| F1 class 7 (Krummholz) | 0.9246 | 0.8725 |
+
+The macro F1 above is the mean over the five folds (the shared protocol in
+`model_comparison.evaluate` pools out-of-fold predictions instead, which
+explains small differences of a few thousandths against `docs/MODELING.md`).
+
+### Decision
+
+**Do not apply class weights.** The shortlisted models are tree-based and
+already handle the imbalance well:
+
+- Random Forest: macro F1 is unchanged (0.9123 → 0.9103, within fold noise)
+  while accuracy drops 1.08 points. Only class 5 (Aspen) improves (+0.032);
+  class 4 is flat and classes 6-7 get slightly worse.
+- XGBoost: macro F1 drops clearly (0.8489 → 0.8005) and class 5 (Aspen)
+  collapses (−0.19), because the aggressive weights (class 4 ×30) over-correct
+  and trade precision for recall without a net gain.
+
+The issue is conditional ("if needed"), so the applied strategy is **none**.
+The finding is recorded so M5 does not re-test this. SMOTE remains rejected for
+the same reasons.
+
+### No data leakage
+
+Class weights are recomputed inside the CV loop from each training fold's `y`
+only; validation folds are scored unweighted. Nothing is fitted on the full
+dataset or on validation/test.
+
+### Usage
+
+```python
+from imbalance_handling import balanced_class_weights, to_sample_weight
+
+weights = balanced_class_weights(y_train)          # {class: weight}
+sample_weight = to_sample_weight(y_train, weights) # per-row, for fit(sample_weight=...)
+```
+
+Not used in the final pipeline: the shortlisted models train on the raw
+features without class weights.
