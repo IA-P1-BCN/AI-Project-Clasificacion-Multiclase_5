@@ -92,6 +92,58 @@ Cover_Type (1-7) or the encoded labels (0-6) of #15.
 If the file is missing or invalid the API still starts: `/health` returns
 `model_loaded: false` with the reason, and `/predict` returns HTTP 503.
 
+## Model export
+
+Issue #32. Reproduce from the project root (about two minutes on 8 CPU cores):
+
+```bash
+python src/export_model.py
+```
+
+It writes two git-ignored files under `models/`; nothing there is committed,
+so every environment that serves the model runs the command once.
+
+| File | Content |
+|---|---|
+| `models/model.joblib` | The fitted scikit-learn `Pipeline` (`joblib`, `compress=3`), loaded by the API. |
+| `models/model_metadata.json` | Model version, creation time, SHA-256 and size of the model file, library versions, hyperparameters, rows used, validation metrics, the 54 feature names and the label mapping. |
+
+- **Pipeline:** `preprocessor` -> `model`. The preprocessor selects the 54
+  `FEATURES` by name and passes them through unchanged (a Random Forest needs no
+  scaling); the model is the primary model of the shortlist (#23),
+  `RandomForestClassifier(n_estimators=100, random_state=42)`, built by
+  `random_forest.build_model()`.
+- **Untuned.** Tuning (#29) is not merged yet, so version `0.1.0` uses the
+  default hyperparameters of #21. Once #29 or #17 change the configuration,
+  bump `MODEL_VERSION` in `src/export_model.py` and re-run the export.
+- **No leakage:** fitted on the train set of the canonical split
+  (`split_train_val_test`, #16; 406,708 rows) only. The validation set is only
+  predicted; the test set is not used (final metrics belong to #25).
+- **Label mapping:** the model is trained on `Cover_Type` (1-7), so column `i`
+  of `predict_proba` is `Cover_Type` `i + 1`. The mapping with the class names
+  is stored in `label_mapping` of the metadata file.
+- **Versioning:** `model_version` plus `model_sha256` in the metadata identify
+  one exact model file; compare the hash to check which model is deployed.
+- **Self-check:** the script reloads the file through
+  `app.serving.load_model()` and fails unless it loads and reproduces the
+  in-memory probabilities on 1,000 validation rows.
+
+Observed (version `0.1.0`, Python 3.12.10, scikit-learn 1.5.1):
+
+| Measure | Value |
+|---|---|
+| Validation accuracy (87,152 rows) | 0.9520 |
+| Validation macro F1 | 0.9186 |
+| Size of `models/model.joblib` | 136.3 MB |
+| Time for `load_model()` plus one prediction | about 10 s |
+
+The example request of the *Backend API* section, passed to
+`app.serving.predict()`, returns `cover_type` 2 (Lodgepole Pine) with
+`confidence` 0.95.
+
+Load the file with the same scikit-learn version it was exported with
+(`requirements.txt` pins 1.5.1; the metadata records the versions used).
+
 ## Dockerization
 
 - `Dockerfile` + `docker-compose.yml`
