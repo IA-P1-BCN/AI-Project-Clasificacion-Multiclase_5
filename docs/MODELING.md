@@ -317,7 +317,112 @@ shared split.
 
 ## Results
 
-_To be filled in M5._
+Issue #25. Reproduce with: `python src/final_metrics.py`
+
+- **Model:** the primary model of the shortlist (#23) and the exported pipeline
+  of #32 (`export_model.build_pipeline` / `fit_pipeline`): a 54-feature
+  passthrough `ColumnTransformer` followed by
+  `RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)`.
+  Per #17 (`docs/PREPROCESSING.md`), inverse-frequency class weights did not
+  improve CV macro F1, so the model is unweighted. Hyperparameter tuning (#29)
+  is still open; re-run `python src/final_metrics.py` if the configuration
+  changes.
+- **Data & no leakage:** canonical `split_train_val_test` (#16): 406,708
+  training rows (70%), 87,152 validation rows (15%) and 87,152 held-out test
+  rows (15%). The pipeline is fitted on `(X_train, y_train)` only; validation
+  and test rows are never passed to `fit`.
+
+### Headline metrics across partitions
+
+| Partition | Rows | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) |
+|---|---:|---:|---:|---:|---:|
+| `train` | 406,708 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| `validation` | 87,152 | 0.9520 | 0.9416 | 0.8990 | 0.9186 |
+| `test` | 87,152 | 0.9510 | 0.9423 | 0.9012 | 0.9199 |
+
+- **Train vs validation accuracy gap (`overfitting_gap`):**
+  `1.0000 - 0.9520 = +0.0480` (`+4.80` percentage points, below the 5% quality
+  gate; formal verification and any regularization belong to #28).
+- **Validation vs test consistency:** test accuracy (`0.9510`) and test macro F1
+  (`0.9199`) are within 0.10 and 0.13 percentage points of validation
+  (`0.9520` and `0.9186`), which is consistent with the model generalizing to
+  the held-out test set.
+
+### Per-class metrics — Validation set (87,152 rows)
+
+| `Cover_Type` | Name | Precision | Recall | F1 | Support |
+|---|---|---:|---:|---:|---:|
+| 1 | Spruce/Fir | 0.9638 | 0.9389 | 0.9512 | 31,776 |
+| 2 | Lodgepole Pine | 0.9464 | 0.9728 | 0.9594 | 42,495 |
+| 3 | Ponderosa Pine | 0.9357 | 0.9608 | 0.9481 | 5,363 |
+| 4 | Cottonwood/Willow | 0.9122 | 0.8325 | 0.8706 | 412 |
+| 5 | Aspen | 0.9263 | 0.7507 | 0.8293 | 1,424 |
+| 6 | Douglas-fir | 0.9343 | 0.8898 | 0.9115 | 2,605 |
+| 7 | Krummholz | 0.9723 | 0.9477 | 0.9598 | 3,077 |
+| | Macro average | 0.9416 | 0.8990 | 0.9186 | 87,152 |
+| | Weighted average | 0.9522 | 0.9520 | 0.9518 | 87,152 |
+
+### Confusion matrix — Validation set (raw counts)
+
+| True \ Pred | Pred 1 | Pred 2 | Pred 3 | Pred 4 | Pred 5 | Pred 6 | Pred 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 Spruce/Fir | 29,835 | 1,852 | 0 | 0 | 9 | 6 | 74 |
+| 2 Lodgepole Pine | 943 | 41,338 | 92 | 1 | 62 | 50 | 9 |
+| 3 Ponderosa Pine | 0 | 90 | 5,153 | 17 | 11 | 92 | 0 |
+| 4 Cottonwood/Willow | 0 | 0 | 60 | 343 | 0 | 9 | 0 |
+| 5 Aspen | 24 | 312 | 13 | 0 | 1,069 | 6 | 0 |
+| 6 Douglas-fir | 3 | 77 | 189 | 15 | 3 | 2,318 | 0 |
+| 7 Krummholz | 149 | 12 | 0 | 0 | 0 | 0 | 2,916 |
+
+### Confusion matrix — Validation set (row-normalized recall %)
+
+| True \ Pred | Pred 1 | Pred 2 | Pred 3 | Pred 4 | Pred 5 | Pred 6 | Pred 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 Spruce/Fir | 93.89% | 5.83% | 0.00% | 0.00% | 0.03% | 0.02% | 0.23% |
+| 2 Lodgepole Pine | 2.22% | 97.28% | 0.22% | 0.00% | 0.15% | 0.12% | 0.02% |
+| 3 Ponderosa Pine | 0.00% | 1.68% | 96.08% | 0.32% | 0.21% | 1.72% | 0.00% |
+| 4 Cottonwood/Willow | 0.00% | 0.00% | 14.56% | 83.25% | 0.00% | 2.18% | 0.00% |
+| 5 Aspen | 1.69% | 21.91% | 0.91% | 0.00% | 75.07% | 0.42% | 0.00% |
+| 6 Douglas-fir | 0.12% | 2.96% | 7.26% | 0.58% | 0.12% | 88.98% | 0.00% |
+| 7 Krummholz | 4.84% | 0.39% | 0.00% | 0.00% | 0.00% | 0.00% | 94.77% |
+
+### Per-class metrics — Test set (87,152 rows)
+
+| `Cover_Type` | Name | Precision | Recall | F1 | Support |
+|---|---|---:|---:|---:|---:|
+| 1 | Spruce/Fir | 0.9621 | 0.9376 | 0.9497 | 31,776 |
+| 2 | Lodgepole Pine | 0.9454 | 0.9718 | 0.9584 | 42,495 |
+| 3 | Ponderosa Pine | 0.9340 | 0.9627 | 0.9481 | 5,363 |
+| 4 | Cottonwood/Willow | 0.9003 | 0.8544 | 0.8767 | 412 |
+| 5 | Aspen | 0.9480 | 0.7556 | 0.8410 | 1,424 |
+| 6 | Douglas-fir | 0.9380 | 0.8825 | 0.9094 | 2,605 |
+| 7 | Krummholz | 0.9686 | 0.9435 | 0.9559 | 3,077 |
+| | Macro average | 0.9423 | 0.9012 | 0.9199 | 87,152 |
+| | Weighted average | 0.9512 | 0.9510 | 0.9507 | 87,152 |
+
+### Confusion matrix — Test set (raw counts)
+
+| True \ Pred | Pred 1 | Pred 2 | Pred 3 | Pred 4 | Pred 5 | Pred 6 | Pred 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 Spruce/Fir | 29,793 | 1,895 | 1 | 0 | 7 | 3 | 77 |
+| 2 Lodgepole Pine | 997 | 41,298 | 89 | 1 | 42 | 51 | 17 |
+| 3 Ponderosa Pine | 0 | 88 | 5,163 | 21 | 7 | 84 | 0 |
+| 4 Cottonwood/Willow | 0 | 0 | 50 | 352 | 0 | 10 | 0 |
+| 5 Aspen | 19 | 310 | 15 | 0 | 1,076 | 4 | 0 |
+| 6 Douglas-fir | 2 | 74 | 210 | 17 | 3 | 2,299 | 0 |
+| 7 Krummholz | 155 | 19 | 0 | 0 | 0 | 0 | 2,903 |
+
+### Confusion matrix — Test set (row-normalized recall %)
+
+| True \ Pred | Pred 1 | Pred 2 | Pred 3 | Pred 4 | Pred 5 | Pred 6 | Pred 7 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 1 Spruce/Fir | 93.76% | 5.96% | 0.00% | 0.00% | 0.02% | 0.01% | 0.24% |
+| 2 Lodgepole Pine | 2.35% | 97.18% | 0.21% | 0.00% | 0.10% | 0.12% | 0.04% |
+| 3 Ponderosa Pine | 0.00% | 1.64% | 96.27% | 0.39% | 0.13% | 1.57% | 0.00% |
+| 4 Cottonwood/Willow | 0.00% | 0.00% | 12.14% | 85.44% | 0.00% | 2.43% | 0.00% |
+| 5 Aspen | 1.33% | 21.77% | 1.05% | 0.00% | 75.56% | 0.28% | 0.00% |
+| 6 Douglas-fir | 0.08% | 2.84% | 8.06% | 0.65% | 0.12% | 88.25% | 0.00% |
+| 7 Krummholz | 5.04% | 0.62% | 0.00% | 0.00% | 0.00% | 0.00% | 94.35% |
 
 ## Error analysis
 
