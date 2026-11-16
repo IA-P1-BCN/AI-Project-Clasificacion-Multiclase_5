@@ -12,10 +12,11 @@ seaborn==0.13.2
 xgboost==2.1.1
 lightgbm==4.5.0
 
-# App (frontend + backend)
+# App (frontend + backend + database)
 streamlit==1.38.0
 fastapi==0.112.2
 uvicorn[standard]==0.30.6
+PyMySQL==1.1.1
 
 # Config
 python-dotenv==1.0.1

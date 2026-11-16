@@ -144,6 +144,72 @@ The example request of the *Backend API* section, passed to
 Load the file with the same scikit-learn version it was exported with
 (`requirements.txt` pins 1.5.1; the metadata records the versions used).
 
+## Database integration
+
+Issue #37. Verify the schema, read/write operations and constraints from the
+project root:
+
+```bash
+python src/database.py
+```
+
+### Database choice and configuration
+
+The project uses **MySQL 8.0** (`mysql:8.0` in `docker-compose.yml`, connected
+via `PyMySQL==1.1.1`) as the production relational database, with an automatic
+**SQLite** fallback (`sqlite:///data/processed/multiclass.db`) when
+`DATABASE_URL` is unset or points to a `sqlite:///` URL during local script
+execution.
+
+Environment variables (see `.env.example`):
+
+| Variable | Default in `docker-compose.yml` | Purpose |
+|---|---|---|
+| `MYSQL_DATABASE` | `multiclass` | Database created on container startup |
+| `MYSQL_USER` | `app` | Application database user |
+| `MYSQL_PASSWORD` | `app` | Application database password |
+| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root password (used by healthcheck) |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` | Connection URL read by `src/database.py` |
+
+### Schema
+
+`init_db()` creates two relational tables:
+
+1. **`predictions`** — one row per `POST /predict` call:
+   - `id` (`INT AUTO_INCREMENT PRIMARY KEY` / `INTEGER PRIMARY KEY AUTOINCREMENT`)
+   - `created_at_utc` (`VARCHAR(32) NOT NULL`) — ISO-8601 UTC timestamp
+   - `model_version` (`VARCHAR(32) NOT NULL`) — version string (e.g. `0.1.0`)
+   - `Elevation`, `Aspect`, `Slope`, `Horizontal_Distance_To_Hydrology`,
+     `Vertical_Distance_To_Hydrology`, `Horizontal_Distance_To_Roadways`,
+     `Hillshade_9am`, `Hillshade_Noon`, `Hillshade_3pm`,
+     `Horizontal_Distance_To_Fire_Points` (`DOUBLE NOT NULL`)
+   - `Wilderness_Area` (`INT NOT NULL`, 1–4)
+   - `Soil_Type` (`INT NOT NULL`, 1–40)
+   - `predicted_cover_type` (`INT NOT NULL`, 1–7)
+   - `predicted_class_name` (`VARCHAR(64) NOT NULL`)
+   - `confidence` (`DOUBLE NOT NULL`)
+   - `probabilities_json` (`TEXT NOT NULL`) — JSON object of the 7 class probabilities
+2. **`feedback`** — user-verified ground truth linked to a prediction:
+   - `id` (`INT AUTO_INCREMENT PRIMARY KEY` / `INTEGER PRIMARY KEY AUTOINCREMENT`)
+   - `prediction_id` (`INT NOT NULL`, `FOREIGN KEY REFERENCES predictions(id)`)
+   - `created_at_utc` (`VARCHAR(32) NOT NULL`)
+   - `true_cover_type` (`INT NOT NULL`, 1–7)
+   - `true_class_name` (`VARCHAR(64) NOT NULL`)
+   - `is_correct` (`INT NOT NULL`, `1` when `true_cover_type == predicted_cover_type`, `0` otherwise)
+   - `comment` (`TEXT`)
+
+### Read / write API (`src/database.py`)
+
+| Function | Purpose |
+|---|---|
+| `init_db(db_url=None)` | Create the `predictions` and `feedback` tables if missing. |
+| `save_prediction(request, prediction, model_version="0.1.0", db_url=None) -> int` | Insert a prediction row and return `prediction_id`. Called automatically by `POST /predict`. |
+| `get_prediction(prediction_id, db_url=None) -> dict \| None` | Fetch one prediction by ID (deserializing `probabilities`). |
+| `list_predictions(limit=100, db_url=None) -> list[dict]` | List the most recent predictions. |
+| `save_feedback(prediction_id, true_cover_type, comment=None, db_url=None) -> int` | Validate `true_cover_type` (`1..7`) and `prediction_id`, compute `is_correct`, and insert a feedback row. |
+| `list_feedback(limit=100, db_url=None) -> list[dict]` | Join `feedback` with `predictions` so monitoring (#35) and retraining (#36) have full feature + label rows. |
+| `db_status(db_url=None) -> dict` | Report connectivity and row counts (used by `GET /health`). |
+
 ## Dockerization
 
 - `Dockerfile` + `docker-compose.yml`
