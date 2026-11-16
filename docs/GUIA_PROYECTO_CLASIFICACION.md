@@ -47,14 +47,14 @@
 | 0 | Definir el problema | 🟡 Parte rellena, 4 decisiones por tomar |
 | 1 | Datos y split | 🟡 Parte rellena, 3 puntos por revisar |
 | 2 | EDA (análisis exploratorio) | ✅ Documentado (queda R1 por decidir) |
-| 3 | Preprocesado | ⬜ Por documentar (hay trabajo hecho en el repo) |
+| 3 | Preprocesado | 🟡 Nulos/duplicados (#12) y escalado (#14) documentados; faltan atípicos (#13) y target encoding (#15) |
 | 4 | Feature engineering y selección | ✅ Documentado (#18) |
 | 5 | Baseline | ⬜ Por documentar (hay trabajo hecho en el repo) |
-| 6 | Entrenamiento y validación | 🟡 Parte rellena (desbalanceo #17); modelos por documentar |
+| 6 | Entrenamiento y validación | 🟡 Desbalanceo (#17), regresión logística (#20) y red neuronal (#24) documentados; faltan árboles y shortlist (#21–#23) |
 | 7 | Ajuste de hiperparámetros | ⬜ |
-| 8 | Evaluación final | ⬜ |
+| 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
 | 9 | Análisis de errores e interpretación | ⬜ |
-| 10 | Despliegue y monitoreo | 🟡 API hecha (#34), CI en curso (#41) |
+| 10 | Despliegue y monitoreo | 🟡 API hecha (#34), pipeline exportado (#32), CI en curso (#41) |
 
 ---
 
@@ -409,7 +409,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 | # | Punto | Qué dice la guía | Qué hay en el repo | Estado |
 |---|---|---|---|---|
 | R1 | **EDA solo con train** | El EDA debe hacerse únicamente sobre el conjunto de entrenamiento. | Los scripts del EDA (`class_eda.py`, `class_distribution.py`, `statistical_insights.py`, `data_audit.py`) cargan el dataset completo (581.012 filas) porque el split se mergeó después (PR #68). **Riesgo bajo:** el EDA solo describió y recomendó, nada se ajustó con esas cifras (el escalado y el recorte de atípicos hacen *fit* sobre train) y con este tamaño las estadísticas de train y del total son casi iguales. La excepción posible es la clase 4 (2.747 filas). | 🟡 Decidir entre (1) dejarlo como limitación o (2) repetir los scripts del EDA sobre train y comprobar que las conclusiones no cambian (barato, los scripts ya existen). |
-| R2 | **Un solo split para todos** | Todos los modelos deben usar las mismas particiones. | Baselines y MLP usan su propio split; hay un ticket (#23) para unificarlo. | ⬜ Unificar con `data_split.py` |
+| R2 | **Un solo split para todos** | Todos los modelos deben usar las mismas particiones. | `logistic_regression.py` (#20), `random_forest.py` (#21), `neural_network.py` (#24), `model_comparison.py` (#23), `imbalance_handling.py` (#17), `export_model.py` (#32) y `final_metrics.py` (#25) ya usan el split canónico de `data_split.py` (#16: 406.708 train / 87.152 val / 87.152 test). Solo `baseline.py` (#19) y `gradient_boosting.py` (#22) tenían un split propio, pero fueron reevaluados sobre el split canónico en `model_comparison.py` (#23). | ✅ Unificado en la comparativa (#23) y en la evaluación final (#25) |
 | R3 | **¿Filas relacionadas entre sí?** | Si hay varias filas de la misma persona/zona, separar por grupos; si hay tiempo, partir por fecha. | No está documentado si las celdas vecinas pueden estar relacionadas. | ⬜ Anotar "no aplica" con justificación, o decidir |
 | R4 | **Test guardado y sin tocar** | No usar el test hasta el final. | No hay constancia escrita de la regla. | ⬜ Acordar y escribir la regla |
 
@@ -532,21 +532,41 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Mi modelo necesita este paso o lo maneja solo? | ⬜ |
-| ¿Estoy ajustando algo con datos que no debería ver (el test)? | ⬜ |
-| ¿Imputar con la media distorsiona esta variable? | ⬜ |
+| ¿Mi modelo necesita este paso o lo maneja solo? | Los modelos lineales (`LogisticRegression`, #20) y las redes neuronales (`MLPClassifier`, #24) **sí necesitan escalado**; sin él la regresión logística ni siquiera converge en 1.000 iteraciones (macro F1 cae de 0,5257 a 0,3296). Los modelos de árboles (Random Forest, XGBoost, LightGBM) cortan por umbrales y **no necesitan escalado**. (D3.2) |
+| ¿Estoy ajustando algo con datos que no debería ver (el test)? | No. `build_preprocessor()` devuelve el `ColumnTransformer` **sin ajustar** (*unfitted*) y se mete dentro de un `Pipeline` de scikit-learn, de modo que cada `fit` (en validación cruzada o en el entrenamiento final) calcula medias y desviaciones típicas **solo con `X_train`**. No se guardó ningún CSV preescalado en `data/processed/` precisamente para evitar ajustar antes del split. (D3.2) |
+| ¿Imputar con la media distorsiona esta variable? | No aplica: el dataset tiene 0 nulos explícitos y 0 nulos encubiertos en los grupos one-hot. Para datos futuros en producción, `clean()` lanza error ante nulos en vez de inventar una imputación silenciosa. (D3.1) |
 
-#### D3.1 · (nombre de la decisión)  (⬜)
+#### D3.1 · Verificación de nulos, ceros y duplicados  (✅)
 
-**Decisión:**
+**Decisión:** no imputar ni eliminar ninguna fila del dataset original (quedan las 581.012 filas intactas), y dejar la función defensiva `clean()` que elimina duplicados exactos y falla en voz alta (`ValueError`) si aparecen nulos en datos futuros.
+
+**Justificación:** además de comprobar que hay 0 `NaN` y 0 filas duplicadas o contradictorias (mismas 54 variables con distinta clase), se comprobaron **nulos encubiertos**:
+- En las 44 binarias: toda fila tiene exactamente una `Wilderness_Area` activa (suma = 1) y un `Soil_Type` activo (suma = 1).
+- En las 10 numéricas: se contaron los ceros (`Vertical_Distance_To_Hydrology` tiene 38.665 ceros; `Horizontal_Distance_To_Hydrology`, 24.603; `Aspect`, 4.914; `Hillshade_3pm`, 1.338), pero **no son nulos disfrazados**, sino valores físicos válidos dentro del rango documentado (estar a 0 m del agua, orientación norte 0°, sombra total).
+
+**Explicación sencilla:** antes de cocinar revisamos que no falte ningún ingrediente ni venga ninguno repetido. Como todo está limpio, no tocamos nada, pero dejamos un "detector" en la puerta por si en el futuro entran datos sucios desde la app.
+
+**Evidencia:** issue #12 · PR #65 · `src/data_cleaning.py` (`missing_report`, `duplicate_report`, `clean`) · `docs/PREPROCESSING.md` (*Missing values and duplicates*) · `specs/feature-12-missing-values-duplicates.md`.
+
+**Responsable:** @levifvy.
+
+---
+
+#### D3.2 · Escalado con `StandardScaler` solo en las 10 numéricas y dentro del `Pipeline`  (✅)
+
+**Decisión:** escalar únicamente las 10 `NUMERIC_FEATURES` con `StandardScaler` y dejar pasar sin tocar (`"passthrough"`) las 44 `BINARY_FEATURES`, dentro de un `ColumnTransformer` sin ajustar (`build_preprocessor("standard")`) que se encadena en un `Pipeline`.
 
 **Justificación:**
+- **Por qué escalar:** las numéricas tienen escalas muy distintas (`Elevation` ronda 2.960 m con desviación 280; `Slope` ronda 14° con desviación 7,5). Sin escalar, `LogisticRegression` no converge en 1.000 iteraciones (macro F1 0,3296).
+- **Por qué `StandardScaler`:** en una prueba sobre muestra estratificada de 60.000 filas con regresión logística, `StandardScaler` (macro F1 0,5257, converge en 233 iteraciones) y `RobustScaler` (0,5253, 182 iteraciones) empatan y superan a `MinMaxScaler` (0,4987, peor en clases minoritarias). `StandardScaler` es el estándar para modelos lineales regularizados y redes.
+- **Por qué no tocar las 44 binarias ni el target:** las binarias ya valen 0 o 1; estandarizar un suelo raro (casi todo ceros) metería valores gigantes en los pocos unos y rompería su significado de indicador sí/no.
+- **Sin fuga de datos (*no leakage*):** verificado con `check_scaling()`: tras ajustar en train, las numéricas de train tienen media 0 y desviación 1 exactas, mientras que en test las medias van de −0,0077 a +0,0030 y las desviaciones de 0,9970 a 1,0054 (prueba de que el test no se usó en el `fit`).
 
-**Explicación sencilla:**
+**Explicación sencilla:** si mezclas metros (miles) con grados (decenas), un modelo lineal se cree que los metros importan cien veces más solo porque el número es más grande. Poner las 10 medidas en la misma escala (media 0, paso 1) las iguala, pero calculando esa regla solo con los datos de estudio (`train`).
 
-**Evidencia:**
+**Evidencia:** issue #14 · PR #66 · `src/feature_scaling.py` (`build_preprocessor`, `scale_train_test`, `check_scaling`, `compare_scalers`) · `docs/PREPROCESSING.md` (*Feature scaling*) · `specs/feature-14-feature-scaling.md`.
 
-**Responsable:**
+**Responsable:** @levifvy.
 
 ---
 
@@ -734,6 +754,40 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 ---
 
+#### D6.2 · Modelo supervisado simple: Regresión Logística multinomial  (✅)
+
+**Decisión:** entrenar un `Pipeline` con `build_preprocessor("standard")` (#14) + `LogisticRegression(max_iter=1000, random_state=42)` (pérdida multinomial, regularización L2 con `C=1.0`) sobre las 406.708 filas del train canónico (#16) bajo el protocolo común de 5 folds estratificados (#19).
+
+**Justificación:** antes de pasar a árboles complejos o redes, hace falta una referencia supervisada lineal que supere claramente a los `DummyClassifier` (macro F1 0,0937 y 0,1426).
+- **Resultado (5-fold CV en train):** accuracy **0,7248 ± 0,0008**, macro F1 **0,5324 ± 0,0037** (converge en 223–269 iteraciones por fold, muy por debajo de `max_iter=1000`).
+- **Lectura por clase:** separa de forma aceptable las clases mayoritarias (F1 de 0,7047 en Spruce/Fir y 0,7736 en Lodgepole Pine), pero fracasa en las minoritarias que no son linealmente separables: **Aspen (clase 5) tiene recall 0,0063 y F1 0,0123**, y Douglas-fir (clase 6) tiene F1 0,3480. Esto demuestra que hacen falta fronteras de decisión no lineales.
+
+**Explicación sencilla:** la regresión logística intenta separar los tipos de bosque trazando "líneas rectas". Supera de largo a adivinar al azar (sube el macro F1 de 0,14 a 0,53), pero como en la naturaleza los bosques no se separan con líneas rectas, casi nunca detecta el álamo temblón (*Aspen*). Sirve como suelo supervisado que los modelos potentes deben batir.
+
+**Evidencia:** issue #20 · PR #73 · `src/logistic_regression.py` · `docs/MODELING.md` (*Simple model: Logistic Regression*) · `specs/feature-20-train-logistic-regression.md`.
+
+**Responsable:** @levifvy.
+
+---
+
+#### D6.3 · Red neuronal: Perceptrón Multicapa (MLP) con *early stopping*  (✅)
+
+**Decisión:** entrenar un `Pipeline` con `build_preprocessor("standard")` (#14) + `MLPClassifier(hidden_layer_sizes=(128, 64), batch_size=512, max_iter=200, early_stopping=True, validation_fraction=0.1, n_iter_no_change=10, random_state=42)` sobre el train canónico (#16) con el protocolo de 5 folds (#19).
+
+**Justificación:**
+- **Por qué MLP y no CNN:** el enunciado pide "CNN si el dataset es visual"; como Covertype es tabular (54 columnas cartográficas), corresponde una red densa (MLP) con dos capas ocultas ReLU (128 y 64 neuronas) y salida *softmax* de 7 clases. Usamos scikit-learn para no añadir dependencias pesadas (PyTorch/TensorFlow).
+- **Control del sobreajuste sin fuga de datos:** `early_stopping=True` separa internamente un 10 % estratificado **de las propias filas de entrenamiento de cada fold** y detiene el entrenamiento tras 10 épocas sin mejora (en el train completo paró en la época 99 de 200). Ni la validación ni el test del proyecto se tocan.
+- **Resultado (5-fold CV en train):** accuracy **0,9035 ± 0,0049**, macro F1 **0,8557 ± 0,0090**.
+- **Comparación con ensembles:** supera en macro F1 a XGBoost (0,8514) y LightGBM (0,8261) en el mismo split y les saca +3,4 puntos de accuracy porque distingue mejor las dos clases mayoritarias, pero queda por detrás de Random Forest (macro F1 0,9124) y tarda ~1 hora en CV (≈10 minutos por ajuste en CPU).
+
+**Explicación sencilla:** una red neuronal conecta dos capas de "neuronas" artificiales que sí pueden dibujar fronteras curvas complejas. Para que no memorice los datos, vigila un 10 % interno de su propio entrenamiento y frena sola cuando deja de mejorar (en la vuelta 99 de 200). Queda segunda de todos los modelos probados, empatada en la práctica con XGBoost pero bastante más lenta de entrenar.
+
+**Evidencia:** issue #24 · PR #74 · `src/neural_network.py` · `docs/MODELING.md` (*Neural network (MLP)*) · `specs/feature-24-neural-network-mlp.md`.
+
+**Responsable:** @levifvy.
+
+---
+
 # Paso 7 · Ajuste de hiperparámetros
 
 > **Idea en una frase:** probar distintas "configuraciones" del modelo para ver cuál rinde mejor, siempre con validación cruzada y **sin mirar el test**.
@@ -781,22 +835,43 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿La métrica coincide con la definida en el Paso 0 (macro F1)? | ⬜ |
-| ¿Rinde igual en todos los subgrupos? ¿Hay sesgo? | ⬜ |
-| ¿El resultado en test es parecido al de validación? Si cae mucho, hubo fuga u overfitting. | ⬜ |
-| ¿Se cumple overfitting < 5 %? | ⬜ |
+| ¿La métrica coincide con la definida en el Paso 0 (macro F1)? | Sí: se reporta **macro F1** como métrica principal (0,9186 en validación y **0,9199 en test**), junto con accuracy, precision/recall/F1 por clase y la matriz de confusión 7×7 (en conteos y en % por fila). (D8.1) |
+| ¿Rinde igual en todos los subgrupos? ¿Hay sesgo? | Rinde muy alto en las clases mayoritarias y alpinas (F1 en test: 0,9584 en Lodgepole Pine, 0,9559 en Krummholz, 0,9497 en Spruce/Fir) y algo más bajo en **Aspen** (clase 5, F1 0,8410, recall 75,56 %, que se confunde un 21,77 % de las veces con Lodgepole Pine) y **Cottonwood/Willow** (clase 4, F1 0,8767, recall 85,44 %, confundida un 12,14 % con Ponderosa Pine). (D8.1) |
+| ¿El resultado en test es parecido al de validación? Si cae mucho, hubo fuga u overfitting. | Es prácticamente idéntico: validación da accuracy **0,9520** y macro F1 **0,9186**; el conjunto de test (87.152 filas nunca vistas) da accuracy **0,9510** (−0,10 pp) y macro F1 **0,9199** (+0,13 pp). No hay caída en test. (D8.1) |
+| ¿Se cumple overfitting < 5 %? | Sí: la diferencia de accuracy entre train (1,0000) y validación (0,9520) es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 %. (D8.1; cierre formal en #28) |
 
-#### D8.1 · (nombre de la decisión)  (⬜)
+#### D8.1 · Métricas finales y matriz de confusión en validación y test  (✅)
 
-**Decisión:**
+**Decisión:** evaluar el pipeline primario del shortlist (`RandomForestClassifier` de 100 árboles, ajustado exclusivamente sobre las 406.708 filas de `train`) sobre las particiones de `validation` (87.152 filas) y `test` (87.152 filas), registrando las métricas globales, las métricas por clase y las matrices de confusión 7×7 en conteos absolutos y en porcentaje normalizado por fila.
+
+| Partición | Filas | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) |
+|---|---:|---:|---:|---:|---:|
+| `train` | 406.708 | 1,0000 | 1,0000 | 1,0000 | 1,0000 |
+| `validation` | 87.152 | 0,9520 | 0,9416 | 0,8990 | 0,9186 |
+| `test` | 87.152 | 0,9510 | 0,9423 | 0,9012 | **0,9199** |
+
+**Métricas por clase en `test` (87.152 filas):**
+
+| `Cover_Type` | Clase | Precision | Recall | F1 | Soporte |
+|---|---|---:|---:|---:|---:|
+| 1 | Spruce/Fir | 0,9621 | 0,9376 | 0,9497 | 31.776 |
+| 2 | Lodgepole Pine | 0,9454 | 0,9718 | 0,9584 | 42.495 |
+| 3 | Ponderosa Pine | 0,9340 | 0,9627 | 0,9481 | 5.363 |
+| 4 | Cottonwood/Willow | 0,9003 | 0,8544 | 0,8767 | 412 |
+| 5 | Aspen | 0,9480 | 0,7556 | 0,8410 | 1.424 |
+| 6 | Douglas-fir | 0,9380 | 0,8825 | 0,9094 | 2.605 |
+| 7 | Krummholz | 0,9686 | 0,9435 | 0,9559 | 3.077 |
 
 **Justificación:**
+- **Sin fuga de datos:** el modelo se entrena una sola vez con `(X_train, y_train)` a través de `export_model.fit_pipeline`. `validation` y `test` solo pasan por `.predict()`.
+- **Doble vista de la matriz de confusión:** con un desbalanceo 1:103, la matriz en conteos muestra dónde está el mayor volumen de errores (la confusión cruzada entre las dos clases gigantes, 1.895 filas de Spruce/Fir predichas como Lodgepole Pine y 997 al revés), mientras que la matriz normalizada por fila (% de recall) revela qué clases pequeñas se escapan más (el 21,77 % de Aspen se predice como Lodgepole Pine y el 12,14 % de Cottonwood/Willow como Ponderosa Pine), dejando la base lista para el análisis de errores (#27).
+- **Gap de sobreajuste:** `train (1,0000) - validation (0,9520) = +0,0480` (+4,80 pp < 5 %).
 
-**Explicación sencilla:**
+**Explicación sencilla:** una vez elegido el mejor modelo, le hacemos el simulacro (`validation`) y el examen final (`test`) con 87.152 parcelas nuevas cada uno. En ambos acierta el 95 % de las parcelas y supera el 0,91 de nota media por clase (macro F1), demostrando que aprendió patrones reales del bosque y no solo de memoria.
 
-**Evidencia:**
+**Evidencia:** issue #25 · `src/final_metrics.py` (`python src/final_metrics.py`) · `docs/MODELING.md` (*Results*) · `specs/feature-25-compute-final-metrics.md`.
 
-**Responsable:**
+**Responsable:** @levifvy.
 
 ---
 
@@ -885,17 +960,19 @@ La zona y el suelo se convierten a las 44 columnas binarias. Los campos desconoc
 
 ---
 
-#### D10.3 · Contrato del modelo exportado  (🟡)
+#### D10.3 · Contrato y exportación del pipeline del modelo  (✅)
 
-**Decisión:** la API carga `models/model.joblib` (ruta cambiable con `MODEL_PATH`), que debe recibir las 54 variables crudas en el orden de entrenamiento, tener `predict_proba` y `classes_`, y declarar `feature_names_in_` igual a esas 54. Las clases pueden venir 1–7 o 0–6 (se decodifican con `target_encoding`). Si el modelo falta o no cumple, la API arranca igual, `/health` informa `model_loaded: false` y `/predict` responde 503.
+**Decisión:**
+1. **Contrato de carga (#34):** la API carga `models/model.joblib` (ruta cambiable con `MODEL_PATH`), que debe recibir las 54 variables crudas en el orden de entrenamiento (`feature_names_in_ == FEATURES`), exponer `predict_proba` y `classes_`, y devolver etiquetas `1–7` (o `0–6`). Si el fichero falta o no cumple, la API arranca igual, `/health` informa `model_loaded: false` y `/predict` responde 503.
+2. **Exportación reproducible (#32):** `python src/export_model.py` entrena exclusivamente sobre `X_train, y_train` (406.708 filas) un `Pipeline` formado por un `ColumnTransformer` passthrough de las 54 `FEATURES` y el modelo primario del shortlist (`RandomForestClassifier(n_estimators=100, random_state=42)`), manteniendo las clases originales **`Cover_Type` de `1–7`**. Serializa el pipeline en `models/model.joblib` (`joblib.dump(..., compress=3)`, 136,3 MB) junto con `models/model_metadata.json` (versión `0.1.0`, fecha UTC, SHA-256 del binario, versiones de librerías, métricas en validación —accuracy 0,9520, macro F1 0,9186— y el mapeo `índice de predict_proba -> Cover_Type 1..7 -> nombre de especie`). Al terminar, ejecuta `check_contract()`, que carga el fichero con `app.serving.load_model()` y comprueba que las probabilidades coinciden exactamente con las del pipeline en memoria.
 
-**Justificación:** permite avanzar sin esperar al modelo final (#32). Si el pipeline guardado incluye `add_features`, debe aceptar las 54 columnas crudas, no 62 (ver D4.5).
+**Justificación:** separar el contrato (#34) del script de exportación (#32) permitió construir la API sin bloquearse, y comprobar el contrato automáticamente al final de `export_model.py` garantiza que el artefacto generado nunca rompe la API. No se sube `.joblib` a Git (`.gitignore`): cualquiera lo regenera con un comando y el SHA-256 de `model_metadata.json` ata los metadatos al fichero exacto.
 
-**Explicación sencilla:** la API es el enchufe y el modelo el aparato; dejamos escrito qué forma debe tener el enchufe.
+**Explicación sencilla:** la API es el enchufe y el modelo es el aparato. En #34 definimos la forma del enchufe y en #32 empaquetamos el modelo definitivo dentro de su caja (`model.joblib`) con su etiqueta de fábrica (`model_metadata.json`), probando que al enchufarlo enciende a la primera.
 
-**Evidencia:** PR #81 · `docs/APP.md`. Probado con un XGBoost de reemplazo, no con el modelo definitivo.
+**Evidencia:** issues #34 y #32 · PRs #81 y #85 · `src/export_model.py`, `app/serving.py` · `docs/APP.md` (*Model export*) · `specs/feature-32-export-model-pipeline.md`.
 
-**Responsable:** @Leandroletoile y equipo. **Abierto:** quién entrega #32 y si exporta 1–7 o 0–6.
+**Responsable:** @Leandroletoile (#34) y @levifvy (#32).
 
 ---
 
@@ -944,10 +1021,10 @@ Además, `pydantic` no está fijado y su compatibilidad con fastapi 0.112.2 no e
 
 # Los 5 errores más comunes (checklist de equipo)
 
-- [ ] **1. Preprocesar antes del split** (fuga de datos). → Primero se reparte, luego se preprocesa. **Estado: parcial.** Las variables de #18 no aprenden nada de los datos. El EDA usó el dataset completo (ver R1).
-- [ ] **2. Usar accuracy con clases desbalanceadas.** → Usamos macro F1 (D0.4). **Estado: cumplido en nuestra parte** (macro F1 y revisión por clase, D2.2 y D4.4).
+- [ ] **1. Preprocesar antes del split** (fuga de datos). → Primero se reparte, luego se preprocesa. **Estado: parcial.** `feature_scaling.py` (#14), `logistic_regression.py` (#20), `neural_network.py` (#24), `export_model.py` (#32) y `final_metrics.py` (#25) ajustan exclusivamente sobre `train` dentro de un `Pipeline`. Las variables de #18 no aprenden nada de los datos. El EDA usó el dataset completo (ver R1).
+- [x] **2. Usar accuracy con clases desbalanceadas.** → Usamos macro F1 (D0.4). **Estado: cumplido** en EDA, preprocesado, comparativa (#23) y evaluación final en validación/test (#25, macro F1 0,9186 / 0,9199 y tabla por clase).
 - [ ] **3. Hacer SMOTE antes de la validación cruzada.** → Solo dentro de cada fold de train.
-- [ ] **4. Mirar el test para tomar decisiones.** → El test se usa una sola vez, al final. **Estado: cumplido en #18:** la selección usó solo CV sobre train y la validación como chequeo; el test no se tocó.
+- [x] **4. Mirar el test para tomar decisiones.** → El test se usa una sola vez, al final. **Estado: cumplido:** el escalado (#14), los modelos (#20–#24), el feature engineering (#18), los pesos de clase (#17) y la exportación (#32) no tocaron el test; el test solo se evaluó al final en `src/final_metrics.py` (#25).
 - [ ] **5. No definir qué error cuesta más antes de empezar.** → Pendiente: D0.7.
 
 ---
@@ -1034,3 +1111,7 @@ Además, `pydantic` no está fijado y su compatibilidad con fastapi 0.112.2 no e
 | **Códigos 200 / 422 / 503** | Todo bien / entrada inválida / el servicio no puede responder (por ejemplo, no hay modelo). |
 | **CI (integración continua) / workflow** | Comprobación automática en cada cambio subido al repo; el workflow es el archivo `.yml` de GitHub Actions que dice qué pasos corre. |
 | **Build de Docker** | Armar la imagen (programa + dependencias). Si arma, la "caja" funciona. |
+| **Convergencia (del optimizador)** | Momento en que el algoritmo iterativo (como la regresión logística) ya encontró su mejor solución y deja de cambiar antes de agotar el límite de intentos (`max_iter`). |
+| **Perceptrón Multicapa (MLP)** | Red neuronal para datos en tablas, formada por varias capas de neuronas conectadas que aprenden combinaciones no lineales. |
+| **Early stopping (parada temprana)** | Frenar el entrenamiento de una red neuronal en cuanto deja de mejorar en un pequeño subconjunto interno de validación, para evitar que memorice (`overfitting`). |
+| **Matriz de confusión normalizada por fila** | Matriz de confusión donde cada fila suma 100 %: la diagonal muestra el *recall* de cada clase y el resto de celdas muestra con qué otra especie se confunde en proporción. |
