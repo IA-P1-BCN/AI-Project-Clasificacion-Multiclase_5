@@ -54,3 +54,7 @@ class PredictionResponse(BaseModel):
     class_name: str = Field(..., description="Dominant tree species of the predicted class.")
     confidence: float = Field(..., description="Probability of the predicted class.")
     probabilities: dict[str, float] = Field(..., description="Probability of each class by name.")
+    prediction_id: int | None = Field(
+        default=None,
+        description="Database row ID of the logged prediction, or None if persistence was skipped.",
+    )
