@@ -62,9 +62,9 @@ Decisions:
 
 ## Acceptance criteria
 
-- [ ] CI runs automatically (only if time allows)
-- [ ] Add workflow to run tests on push
-- [ ] Add Docker build step
+- [x] CI runs automatically (only if time allows)
+- [x] Add workflow to run tests on push (the pytest step runs once a 	ests/ folder exists; #40)
+- [x] Add Docker build step
 - [ ] A change that breaks an import or the Docker build makes the check fail
 
 ## Verification
@@ -78,3 +78,13 @@ Decisions:
 3. On a throwaway branch that is not merged, add `import nonexistent_module` to
    a file in `src/` and open a pull request: the *Install, imports and tests*
    job fails.
+
+## Results
+
+Observed (2026-11-16) on GitHub Actions:
+
+- The *CI* workflow runs on every pull request and on every push to `develop`. On `develop` at `54f2d74` (CI #18, 3 min 33 s) both jobs, *Install, imports and tests* and *Docker build*, are green with the versions pinned in `requirements.txt` (Python 3.11).
+- The *Run tests* step is skipped because there is no `tests/` folder yet.
+- A newer push to the same branch cancels the run in progress (`concurrency`).
+
+Pending: the failing-change check (verification step 3, a throwaway branch with `import nonexistent_module`), so the last criterion stays unchecked.
