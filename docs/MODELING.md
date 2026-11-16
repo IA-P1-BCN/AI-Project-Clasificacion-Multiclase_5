@@ -344,9 +344,9 @@ Issue #25. Reproduce with: `python src/final_metrics.py`
   `1.0000 - 0.9520 = +0.0480` (`+4.80` percentage points, below the 5% quality
   gate; formal verification and any regularization belong to #28).
 - **Validation vs test consistency:** test accuracy (`0.9510`) and test macro F1
-  (`0.9199`) match validation (`0.9520` and `0.9186`) within ~0.1 percentage
-  points, confirming that the model generalizes to the held-out test set without
-  leakage.
+  (`0.9199`) are within 0.10 and 0.13 percentage points of validation
+  (`0.9520` and `0.9186`), which is consistent with the model generalizing to
+  the held-out test set.
 
 ### Per-class metrics — Validation set (87,152 rows)
 
