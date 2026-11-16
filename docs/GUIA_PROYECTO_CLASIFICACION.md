@@ -54,7 +54,7 @@
 | 7 | Ajuste de hiperparámetros | ⬜ |
 | 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
 | 9 | Análisis de errores e interpretación | ⬜ |
-| 10 | Despliegue y monitoreo | 🟡 API hecha (#34), pipeline exportado (#32), CI en curso (#41) |
+| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), pipeline exportado (#32) y CI en verde (#41); faltan el endpoint de feedback (#35) y el monitoreo de drift |
 
 ---
 
@@ -451,7 +451,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 **Explicación sencilla:** contamos las piezas de la caja antes de armar el puzzle: están todas, ninguna repetida ni vacía.
 
-**Evidencia:** issue #7 · PR #54 · `src/data_audit.py` · `docs/EDA.md` (Dataset audit).
+**Evidencia:** issue #7 · PR #54 · `src/data_audit.py` · `docs/EDA.md` (Dataset audit) · `specs/feature-7-audit-dataset.md`.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -465,7 +465,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 **Explicación sencilla:** si el 85 % del examen es de dos temas, una buena nota general no prueba que sepas el resto.
 
-**Evidencia:** issue #8 · PR #56 · `src/class_distribution.py` · `docs/figures/class_distribution.png`. Se aplicó en #16 (split, ver D1.3 y D1.4) y #19 (StratifiedKFold, ver D1.9).
+**Evidencia:** issue #8 · PR #56 · `src/class_distribution.py` · `docs/figures/class_distribution.png` · `specs/feature-8-class-distribution.md`. Se aplicó en #16 (split, ver D1.3 y D1.4) y #19 (StratifiedKFold, ver D1.9).
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -479,7 +479,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 **Explicación sencilla:** le preguntamos a cada variable "¿cuánto cambias según el tipo de bosque?". La altitud respondió "muchísimo"; casi todas las demás, "poco".
 
-**Evidencia:** issue #9 · PR #58 · `src/class_eda.py` · `docs/EDA.md` (Feature analysis).
+**Evidencia:** issue #9 · PR #58 · `src/class_eda.py` · `docs/EDA.md` (Feature analysis) · `specs/feature-9-class-eda.md`.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -493,7 +493,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 **Explicación sencilla:** raro no es error: aquí los valores raros son terrenos poco comunes.
 
-**Evidencia:** issue #10 · PR #59 · `src/statistical_insights.py` · `docs/figures/`.
+**Evidencia:** issue #10 · PR #59 · `src/statistical_insights.py` · `docs/figures/` · `specs/feature-10-statistical-insights.md`.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -507,7 +507,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 **Explicación sencilla:** el EDA termina con una lista de tareas para la fase siguiente.
 
-**Evidencia:** issue #11 · PR #61 · `docs/EDA.md` (Findings). Descarga del dataset en el README (#60), correcciones en PR #62.
+**Evidencia:** issue #11 · PR #61 · `docs/EDA.md` (Findings) · `specs/feature-11-document-eda-findings.md`. Descarga del dataset en el README (#60), correcciones en PR #62.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -915,19 +915,19 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Cómo sabremos que el modelo empezó a fallar? | ⬜ Hoy solo existe `GET /health`, que dice si el servicio y el modelo están cargados. No se guardan predicciones ni se detecta *data drift*. |
+| ¿Cómo sabremos que el modelo empezó a fallar? | 🟡 Cada predicción de `POST /predict` se guarda en la base de datos (tabla `predictions`, #37) y `GET /health` informa si el modelo y la base están disponibles. Ya existe la tabla `feedback` para registrar la clase real, pero falta el endpoint que la use (#35) y no hay detección de *data drift*. |
 | ¿Cada cuánto hay que reentrenar? | ⬜ Por decidir. |
 | ¿Qué pasa si el modelo se equivoca? ¿Hay revisión humana? | La API devuelve `confidence` y las probabilidades de las 7 clases, para que una persona revise los casos dudosos. La revisión humana no está implementada. ⬜ |
 
 #### D10.1 · API con FastAPI y dos endpoints  (✅)
 
-**Decisión:** exponer el modelo con FastAPI en `app/api.py`: `GET /health` (`status`, `model_loaded`, `detail`) y `POST /predict`, que devuelve `cover_type` (1–7), `class_name`, `confidence` y `probabilities`.
+**Decisión:** exponer el modelo con FastAPI en `app/api.py`: `GET /health` (`status`, `model_loaded`, `db_connected`, `detail`, `db_detail`) y `POST /predict`, que devuelve `cover_type` (1–7), `class_name`, `confidence`, `probabilities` y `prediction_id` (la fila guardada en la base de datos, #37; `null` si la base no está disponible).
 
 **Justificación:** separar el modelo de la interfaz permite que la app, scripts o cualquier cliente lo usen igual. `/health` permite comprobar el servicio sin predecir.
 
 **Explicación sencilla:** una ventanilla: entra el formulario con los datos del terreno y sale el tipo de bosque, con qué tan seguro está el modelo.
 
-**Evidencia:** issue #34 · PR #81 · `app/api.py`, `app/serving.py`, `app/schemas.py` · `docs/APP.md`.
+**Evidencia:** issue #34 · PRs #81 y #90 · `app/api.py`, `app/serving.py`, `app/schemas.py` · `docs/APP.md`.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -976,7 +976,7 @@ La zona y el suelo se convierten a las 44 columnas binarias. Los campos desconoc
 
 ---
 
-#### D10.4 · Integración continua con GitHub Actions  (🟡)
+#### D10.4 · Integración continua con GitHub Actions  (✅)
 
 **Decisión:** `.github/workflows/ci.yml` corre en cada push y PR con dos trabajos:
 1. Instala las dependencias fijadas en Python 3.11, ejecuta `scripts/check_imports.py` (importa todos los módulos de `src/` y `app/`) y corre `pytest` solo si hay tests.
@@ -988,7 +988,7 @@ Todavía no hay despliegue automático (CD).
 
 **Explicación sencilla:** un revisor automático que comprueba que el proyecto sigue arrancando.
 
-**Evidencia:** issue #41 · `.github/workflows/ci.yml` · `specs/feature-41-ci-cd-pipeline.md`. Los criterios de la spec quedan sin marcar hasta ver la primera ejecución en verde.
+**Evidencia:** issue #41 · `.github/workflows/ci.yml` · `specs/feature-41-ci-cd-pipeline.md`. Observado el 16-nov-2026: la CI corre en cada PR y en cada push a `develop`; en `develop` (commit `54f2d74`, CI #18) los dos trabajos están en verde con las versiones fijadas de `requirements.txt` (Python 3.11). Queda sin comprobar el cuarto criterio de la spec: que un cambio que rompa un import haga fallar el check.
 
 **Responsable:** @Leandroletoile y equipo.
 
@@ -1007,7 +1007,7 @@ Todavía no hay despliegue automático (CD).
 | fastapi | 0.162.5 | 0.112.2 |
 | numpy | — | 1.26.4 |
 
-Además, `pydantic` no está fijado y su compatibilidad con fastapi 0.112.2 no está probada. La CI instala las versiones fijadas, así que será la primera prueba real.
+Además, `pydantic` no está fijado, pero la CI (que instala las versiones fijadas de `requirements.txt` en Python 3.11) ya pasó en verde importando `app.api` con `fastapi==0.112.2`, así que esa combinación funciona. Lo que sigue pendiente es decidir si se alinea el entorno local con el fijado.
 
 **Justificación:** un modelo guardado con `joblib` en una versión puede fallar al abrirse en otra. Conviene entrenar y servir en el mismo entorno (el Docker).
 
