@@ -54,19 +54,30 @@ def expand_compact_sample(sample: dict) -> dict:
             f"Compact sample must have fields {COMPACT_FIELDS}; "
             f"missing={sorted(missing)}, extra={sorted(extra)}"
         )
-    wilderness = int(sample["Wilderness_Area"])
-    soil = int(sample["Soil_Type"])
+    try:
+        values = {name: float(sample[name]) for name in COMPACT_FIELDS}
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Compact sample has a non-numeric value: {exc}") from exc
+    for name, value in values.items():
+        if value != value:  # NaN
+            raise ValueError(f"Null values are not allowed; {name} is NaN")
+    for name in ("Wilderness_Area", "Soil_Type", TARGET):
+        if not values[name].is_integer():
+            raise ValueError(f"{name} must be an integer, got {sample[name]}")
+    wilderness = int(values["Wilderness_Area"])
+    soil = int(values["Soil_Type"])
     if not (1 <= wilderness <= len(WILDERNESS_FEATURES)):
         raise ValueError(f"Wilderness_Area must be in 1..4, got {wilderness}")
     if not (1 <= soil <= len(SOIL_FEATURES)):
         raise ValueError(f"Soil_Type must be in 1..40, got {soil}")
 
-    row = {col: int(round(float(sample[col]))) for col in NUMERIC_FEATURES}
+    # The API (#34) accepts decimals; the dataset stores whole units, so numerics are rounded.
+    row = {col: int(round(values[col])) for col in NUMERIC_FEATURES}
     for idx, col in enumerate(WILDERNESS_FEATURES, start=1):
         row[col] = int(wilderness == idx)
     for idx, col in enumerate(SOIL_FEATURES, start=1):
         row[col] = int(soil == idx)
-    row[TARGET] = int(sample[TARGET])
+    row[TARGET] = int(values[TARGET])
     return row
 
 
@@ -113,8 +124,13 @@ def validate_samples(df: pd.DataFrame) -> pd.DataFrame:
         null_cols = df.columns[df.isna().any()].tolist()
         raise ValueError(f"Null values are not allowed; found nulls in {null_cols}")
 
+    numeric = df.apply(pd.to_numeric, errors="raise")
+    fractional = numeric.columns[(numeric % 1 != 0).any()].tolist()
+    if fractional:
+        raise ValueError(f"All 55 columns must hold integer values; found decimals in {fractional}")
+
     for col, (low, high) in NUMERIC_BOUNDS.items():
-        series = pd.to_numeric(df[col], errors="raise")
+        series = numeric[col]
         out_of_bounds = (series < low) | (series > high)
         if out_of_bounds.any():
             bad_val = series[out_of_bounds].iloc[0]

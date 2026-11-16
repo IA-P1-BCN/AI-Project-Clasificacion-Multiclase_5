@@ -58,7 +58,10 @@ Decisions and reasons:
     accepts either compact records (`dict` / `list[dict]` / `DataFrame`) or
     already-expanded 55-column frames.
 - **Strict validation (`validate_samples`) before storage.**
-  - Checks: exact column set (`COLUMNS`), no nulls (`NaN`), physical bounds on
+  - Checks: exact column set (`COLUMNS`), no nulls (`NaN`), integer values
+    only (the numeric features of a compact record are rounded to whole units,
+    as in the dataset; a decimal label, indicator or 55-column value is
+    rejected instead of truncated), physical bounds on
     the 10 numeric features matching `app/schemas.py` (`Elevation` 0-5000,
     `Aspect` 0-360, `Slope` 0-90, horizontal distances 0-10000,
     `Vertical_Distance_To_Hydrology` -500 to 1000, `Hillshade_*` 0-255), binary
@@ -96,12 +99,14 @@ Decisions and reasons:
 ## Verification
 
 ```bash
-python src/retraining.py
+docker compose up -d --build
+docker compose exec app python src/retraining.py
+docker compose exec app python src/retraining.py --full
 ```
 
-Observed (2026-11-16, Python 3.12.10, scikit-learn 1.5.1):
+Observed (2026-11-16, Docker, Python 3.11.18, scikit-learn 1.5.1):
 
-- `python src/retraining.py` exited 0 in ~6 s:
+- `python src/retraining.py` exited 0 in ~1 min:
   - Compact & 55-column ingestion + deduplication check passed (2 unique rows).
   - Out-of-bounds (`Elevation=9999`), invalid label (`Cover_Type=9`) and
     invalid one-hot (`Soil_Type=99`) rejection checks passed.
@@ -112,5 +117,23 @@ Observed (2026-11-16, Python 3.12.10, scikit-learn 1.5.1):
   - End-to-end sample retraining and artifact export check (20,000 stratified
     rows) passed: validation accuracy `0.8197`, validation macro F1 `0.6992`,
     and temporary `model.joblib` + `model_metadata.json` written and verified.
-- `git status --short` shows only `specs/feature-36-retraining-pipeline.md`,
-  `src/retraining.py` and `docs/APP.md`; nothing under `data/` or `models/`.
+- `python src/retraining.py --full`, after ingesting 2 samples into
+  `data/processed/new_samples.csv` with `ingest_samples`, exited 0 in ~2 min:
+  rows `train_base=406,708`, `new_samples_added=2`, `train_total=406,710`,
+  `validation=87,152`; validation accuracy `0.9520`, macro F1 `0.9183`, gate
+  (>= 0.90) passed. `models/` was not modified (`--full` does not promote).
+- Extra rejection cases, all `ValueError` and storage left unchanged: missing
+  or extra field, `NaN`, `None`, text value, `Wilderness_Area=0`,
+  `Cover_Type=0`, `Cover_Type=2.7`, negative `Elevation`, two active
+  `Soil_Type` indicators, decimal value in a 55-column row, empty list.
+- `git status --short` shows nothing under `data/` or `models/`.
+
+Known limits:
+
+- Promotion (`promote=True`) is only available from Python
+  (`retrain_pipeline`); the command line evaluates without replacing
+  `models/model.joblib`.
+- Two samples with the same 54 features and different `Cover_Type` are both
+  stored; only exact duplicates are dropped.
+- Feedback stored in the database (#37, `list_feedback`) is not ingested
+  automatically; that link belongs to the feedback system (#35).

@@ -149,15 +149,19 @@ Load the file with the same scikit-learn version it was exported with
 Issue #36. Verify and reproduce from the project root:
 
 ```bash
-python src/retraining.py
+docker compose exec app python src/retraining.py
 ```
 
 Run a full retraining evaluation against the canonical dataset and any samples
-stored in `data/processed/new_samples.csv`:
+stored in `data/processed/new_samples.csv` (about 2 minutes; it reports the
+validation metrics and does not replace `models/model.joblib`):
 
 ```bash
-python src/retraining.py --full
+docker compose exec app python src/retraining.py --full
 ```
+
+With 2 new samples (2026-11-16): `train_total=406,710`, validation accuracy
+`0.9520`, macro F1 `0.9183`.
 
 ### Storage format
 
@@ -178,7 +182,8 @@ immutable). The CSV uses a header with the 55 canonical `COLUMNS` (`FEATURES` +
 
 Before writing to disk, `validate_samples()` enforces:
 
-- All 55 `COLUMNS` present with zero nulls (`NaN`).
+- All 55 `COLUMNS` present with zero nulls (`NaN`) and integer values only
+  (the numeric features of a compact record are rounded to whole units).
 - Physical bounds on the 10 numeric features matching `app/schemas.py`
   (`Elevation` 0–5000, `Aspect` 0–360, `Slope` 0–90, horizontal distances
   0–10000, `Vertical_Distance_To_Hydrology` -500 to 1000, `Hillshade_*` 0–255).
