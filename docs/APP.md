@@ -144,6 +144,84 @@ The example request of the *Backend API* section, passed to
 Load the file with the same scikit-learn version it was exported with
 (`requirements.txt` pins 1.5.1; the metadata records the versions used).
 
+## New data collection and retraining pipeline
+
+Issue #36. Verify and reproduce from the project root:
+
+```bash
+python src/retraining.py
+```
+
+Run a full retraining evaluation against the canonical dataset and any samples
+stored in `data/processed/new_samples.csv`:
+
+```bash
+python src/retraining.py --full
+```
+
+### Storage format
+
+Newly collected labeled observations are stored in
+`data/processed/new_samples.csv` (git-ignored; `data/raw/covtype.data` remains
+immutable). The CSV uses a header with the 55 canonical `COLUMNS` (`FEATURES` +
+`Cover_Type` in `1..7`), all stored as `int64`.
+
+### Ingestion path (`src/retraining.py`)
+
+`ingest_samples(samples, path=NEW_DATA_PATH)` accepts:
+
+1. **Compact 13-field records** (`dict`, `list[dict]`, or `DataFrame` with the
+   10 `NUMERIC_FEATURES`, `Wilderness_Area` in `1..4`, `Soil_Type` in `1..40`
+   and `Cover_Type` in `1..7`, matching the API payload of `#34`), which
+   `expand_compact_sample()` converts into the 55 one-hot-expanded columns.
+2. **Full 55-column records** (`COLUMNS` in order).
+
+Before writing to disk, `validate_samples()` enforces:
+
+- All 55 `COLUMNS` present with zero nulls (`NaN`).
+- Physical bounds on the 10 numeric features matching `app/schemas.py`
+  (`Elevation` 0–5000, `Aspect` 0–360, `Slope` 0–90, horizontal distances
+  0–10000, `Vertical_Distance_To_Hydrology` -500 to 1000, `Hillshade_*` 0–255).
+- Binary values `{0, 1}` on the 44 indicators, with **exactly one active
+  `Wilderness_Area` and one active `Soil_Type` per row** (#12).
+- `Cover_Type` in `1..7` (#15).
+
+Valid incoming rows are concatenated with existing stored rows and passed
+through `data_cleaning.clean()` (#12) to drop exact duplicates before saving.
+
+```python
+from retraining import ingest_samples, load_new_samples
+
+ingest_samples({
+    "Elevation": 2950, "Aspect": 160, "Slope": 14,
+    "Horizontal_Distance_To_Hydrology": 240,
+    "Vertical_Distance_To_Hydrology": 35,
+    "Horizontal_Distance_To_Roadways": 2100,
+    "Hillshade_9am": 218, "Hillshade_Noon": 228, "Hillshade_3pm": 142,
+    "Horizontal_Distance_To_Fire_Points": 1850,
+    "Wilderness_Area": 1, "Soil_Type": 29,
+    "Cover_Type": 2,
+})
+stored_df = load_new_samples()
+```
+
+### Retraining procedure (no data leakage)
+
+1. **Fixed evaluation splits:** `prepare_retraining_splits(raw_df, new_samples_df)`
+   splits the original cleaned dataset with `split_train_val_test` (#16,
+   `random_state=42`) **first**, keeping `validation` (87,152 rows) and `test`
+   (87,152 rows) fixed across retraining runs.
+2. **Held-out leakage guard:** any incoming row whose 54 features match an
+   existing `validation` or `test` row is filtered out before training, and
+   exact duplicates are removed via `clean()`.
+3. **Train-only augmentation & quality gate:** `retrain_pipeline(...)` appends
+   the remaining new samples exclusively to `(X_train, y_train)`, fits the
+   pipeline (`export_model.fit_pipeline`), and evaluates on the fixed
+   `validation` set. When `promote=True` and validation `macro_f1 >= min_macro_f1`
+   (default `0.90`), it exports the updated `models/model.joblib` and
+   `models/model_metadata.json` (recording `train_base`, `new_samples_added`,
+   `train_total` and `validation` row counts).
+
 ## Dockerization
 
 - `Dockerfile` + `docker-compose.yml`
