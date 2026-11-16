@@ -412,6 +412,16 @@ def main() -> None:
     )
     print("Constraint checks (invalid Cover_Type / missing prediction_id rejection): passed")
 
+    # The checks above run on a temporary SQLite file; also report the configured database.
+    if os.getenv("DATABASE_URL"):
+        live = db_status()
+        if not live["connected"]:
+            raise SystemExit(f"Configured DATABASE_URL is not reachable: {live['error']}")
+        print(
+            f"Configured DATABASE_URL: connected ({live['backend']}, "
+            f"predictions={live['predictions_count']}, feedback={live['feedback_count']})"
+        )
+
 
 if __name__ == "__main__":
     main()

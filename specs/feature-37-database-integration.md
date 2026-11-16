@@ -26,9 +26,10 @@ wire prediction logging into the FastAPI backend, and document the schema in
   - `docker-compose.yml` and `.env.example`: active `db` service running
     `mysql:8.0` with a healthcheck and persistent volume `db_data`, wired to the
     `app` service via `DATABASE_URL`.
-  - `requirements.txt`: pin `PyMySQL==1.1.1` (pure-Python MySQL driver).
+  - `requirements.txt`: pin `PyMySQL==1.1.1` (pure-Python MySQL driver) and
+    `cryptography==43.0.1` (new dependencies, see *Decisions*).
   - `app/api.py` and `app/schemas.py`: initialize the database at startup,
-    report `db_connected` in `GET /health`, log every `POST /predict` call on a
+    report `db_connected` and `db_detail` in `GET /health`, log every `POST /predict` call on a
     best-effort basis, and return `prediction_id` (`int | None`) in
     `PredictionResponse`.
   - `docs/APP.md`: new *Database integration* section documenting the database
@@ -48,9 +49,9 @@ wire prediction logging into the FastAPI backend, and document the schema in
 | `src/database.py` | New. Dual-driver (`mysql` via `pymysql`, `sqlite` via stdlib `sqlite3`) persistence layer for `predictions` and `feedback`, with `main()` verification. |
 | `docker-compose.yml` | Enable the `db` service with `mysql:8.0`, healthcheck, port `3306:3306`, persistent `db_data` volume, and `DATABASE_URL` on `app`. |
 | `.env.example` | Replace commented Postgres placeholders with MySQL variables (`MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `DATABASE_URL`). |
-| `requirements.txt` | Add `PyMySQL==1.1.1`. |
+| `requirements.txt` | Add `PyMySQL==1.1.1` and `cryptography==43.0.1`. |
 | `app/schemas.py` | Add optional `prediction_id: int | None = None` to `PredictionResponse`. |
-| `app/api.py` | Initialize DB in `lifespan`, add `db_connected` to `GET /health`, and call `save_prediction` in `POST /predict` without failing the prediction if the DB is unreachable. |
+| `app/api.py` | Initialize DB in `lifespan`, add `db_connected` and `db_detail` (the connection error, if any) to `GET /health`, and call `save_prediction` in `POST /predict` without failing the prediction if the DB is unreachable. |
 | `docs/APP.md` | Document the MySQL / SQLite configuration, the `predictions` and `feedback` tables, and the read/write API. |
 
 Decisions and reasons:
@@ -73,7 +74,18 @@ Decisions and reasons:
 - **Best-effort logging in `/predict`.** Just as `app/serving.py` never crashes
   the API when `models/model.joblib` is missing (#34), a database connection
   error during `POST /predict` is caught and returns `prediction_id: None` so
-  inference stays available even if the DB container is restarting.
+  inference stays available even if the DB container is restarting. The error
+  is logged as a warning and exposed in `/health` (`db_detail`), so a broken
+  connection is visible instead of silent.
+- **New dependencies: `PyMySQL==1.1.1` and `cryptography==43.0.1`.** MySQL 8
+  creates users with the `caching_sha2_password` plugin, and PyMySQL needs
+  `cryptography` to log in with it over a non-TLS connection. Without it every
+  connection from the `app` container fails with `'cryptography' package is
+  required for sha256_password or caching_sha2_password auth methods`.
+- **Healthcheck over TCP with the configured root password.**
+  `mysqladmin ping -h 127.0.0.1 -p$$MYSQL_ROOT_PASSWORD` follows
+  `MYSQL_ROOT_PASSWORD` from `.env` and does not report healthy while the
+  first-start bootstrap server (socket only) is still running.
 
 ## Acceptance criteria
 
@@ -88,18 +100,36 @@ Decisions and reasons:
 ## Verification
 
 ```bash
-python src/database.py
+docker compose up -d --build
+docker compose exec app python src/database.py
+docker compose exec app python scripts/check_imports.py
 ```
 
-Observed (2026-11-16, Python 3.12.10):
+Observed (2026-11-16, Docker, Python 3.11.18, MySQL 8.0, from an empty
+`db_data` volume):
 
-- `python src/database.py` exited 0:
-  - Verified `predictions` (19 columns) and `feedback` (7 columns, FK to
-    `predictions.id`) schema creation.
-  - Verified `save_prediction`, `get_prediction`, `list_predictions`,
-    `save_feedback` (both matching `is_correct=True` and mismatching
-    `is_correct=False`), `list_feedback` (joined query), and `db_status`.
-  - Verified `ValueError` rejection for invalid `true_cover_type` (`99`) and
-    non-existent `prediction_id` (`9999`).
-- `git status --short` shows only the expected tracked files; no database file
-  is left under `data/` or `models/`.
+- `docker compose up -d --build`: `multiclass_db` reaches `healthy` and
+  `multiclass_app` starts after it.
+- `python src/database.py` exited 0: SQLite self-checks passed (schema, CRUD,
+  join, `ValueError` on `true_cover_type=99` and on `prediction_id=9999`) and
+  the last line reports `Configured DATABASE_URL: connected (mysql, ...)`.
+- `python scripts/check_imports.py`: all 22 modules import.
+- Against MySQL, from the `app` container: `save_prediction`, `get_prediction`,
+  `list_predictions`, `save_feedback` and `list_feedback` round-trip a row;
+  `SHOW CREATE TABLE feedback` shows the foreign key to `predictions(id)`.
+- API (`uvicorn app.api:app --port 8000` inside the `app` container):
+  `GET /health` returns `db_connected: true`; two `POST /predict` calls return
+  `prediction_id` 2 and 3 and the rows are in `predictions`; an invalid
+  `Soil_Type=99` returns 422.
+- Persistence: after `docker compose down` and `docker compose up -d` the
+  `predictions` and `feedback` rows are still there (volume `db_data`).
+- Database down (`docker compose stop db`): `POST /predict` still returns 200
+  with `prediction_id: null`, the API logs `Prediction not persisted: ...` and
+  `/health` returns `db_connected: false` with the error in `db_detail`.
+
+Not verified: the Streamlit app does not call the API or the database yet
+(#35, #38), so nothing is persisted from the UI.
+
+Found during verification and fixed: with only `PyMySQL` installed the `app`
+container could not log in to MySQL 8 (missing `cryptography`), and the API
+hid the error, so nothing was persisted under Docker.

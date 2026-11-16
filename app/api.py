@@ -4,12 +4,15 @@ Run from the project root: `uvicorn app.api:app --port 8000`
 Interactive documentation: http://localhost:8000/docs
 """
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import FastAPI, HTTPException
 
 from app.schemas import PredictionRequest, PredictionResponse
 from app.serving import MODEL_PATH, load_model, predict
 from database import db_status, init_db, save_prediction
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
@@ -18,8 +21,8 @@ async def lifespan(app: FastAPI):
     app.state.loaded = load_model(MODEL_PATH)
     try:
         init_db()
-    except Exception:
-        pass  # A missing or unreachable DB must not stop the API from starting
+    except Exception as exc:  # a missing or unreachable DB must not stop the API from starting
+        logger.warning("Database not available at startup: %s", exc)
     yield
 
 
@@ -40,6 +43,7 @@ def health() -> dict:
         "model_loaded": loaded.ready,
         "db_connected": db["connected"],
         "detail": loaded.error,
+        "db_detail": db["error"],
     }
 
 
@@ -52,6 +56,7 @@ def predict_cover_type(request: PredictionRequest) -> dict:
     result = predict(loaded, request)
     try:
         result["prediction_id"] = save_prediction(request, result)
-    except Exception:
+    except Exception as exc:  # the prediction is still returned when the DB is down
+        logger.warning("Prediction not persisted: %s", exc)
         result["prediction_id"] = None
     return result

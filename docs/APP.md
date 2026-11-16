@@ -30,7 +30,7 @@ Interactive documentation (Swagger): <http://localhost:8000/docs>.
 
 | Endpoint | What it does |
 |---|---|
-| `GET /health` | Service status and whether a model is loaded. |
+| `GET /health` | Service status, whether a model is loaded and whether the database is reachable (`db_connected`, `db_detail`). |
 | `POST /predict` | Validates the input and returns the predicted cover type with its confidence. |
 
 Example request body (`POST /predict`):
@@ -150,13 +150,20 @@ Issue #37. Verify the schema, read/write operations and constraints from the
 project root:
 
 ```bash
-python src/database.py
+docker compose up -d --build
+docker compose exec app python src/database.py
 ```
+
+The script runs its read/write checks on a temporary SQLite file and, when
+`DATABASE_URL` is set (as in the `app` container), also connects to that
+database and prints its row counts; it exits with an error if it cannot
+connect.
 
 ### Database choice and configuration
 
 The project uses **MySQL 8.0** (`mysql:8.0` in `docker-compose.yml`, connected
-via `PyMySQL==1.1.1`) as the production relational database, with an automatic
+via `PyMySQL==1.1.1`, which needs `cryptography==43.0.1` for the MySQL 8
+login) as the production relational database, with an automatic
 **SQLite** fallback (`sqlite:///data/processed/multiclass.db`) when
 `DATABASE_URL` is unset or points to a `sqlite:///` URL during local script
 execution.
@@ -209,6 +216,11 @@ Environment variables (see `.env.example`):
 | `save_feedback(prediction_id, true_cover_type, comment=None, db_url=None) -> int` | Validate `true_cover_type` (`1..7`) and `prediction_id`, compute `is_correct`, and insert a feedback row. |
 | `list_feedback(limit=100, db_url=None) -> list[dict]` | Join `feedback` with `predictions` so monitoring (#35) and retraining (#36) have full feature + label rows. |
 | `db_status(db_url=None) -> dict` | Report connectivity and row counts (used by `GET /health`). |
+
+If the database is unreachable, `POST /predict` still answers, with
+`prediction_id: null`; the reason is logged and shown in `/health` as
+`db_detail`. Rows survive `docker compose down` in the `db_data` volume
+(`docker compose down -v` deletes them).
 
 ## Dockerization
 
