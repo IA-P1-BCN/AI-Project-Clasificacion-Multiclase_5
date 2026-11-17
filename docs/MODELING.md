@@ -303,8 +303,88 @@ numeric, but this partly reflects a known bias of impurity-based importance
 the low individual scores of the one-hot `Wilderness_Area` and `Soil_Type`
 indicators understate their role rather than measure it. A permutation
 importance, or a gain-based importance (as explored in #18, where `Soil_Type`
-columns rank highly), would order them differently; #23 can revisit this on the
-shared split.
+columns rank highly), would order them differently. The permutation importance
+below (#26) does exactly that on the shared split.
+
+### Feature importance — permutation (validation partition, #26)
+
+Issue #26. Reproduce with: `python src/feature_importance.py`. The Random Forest
+is fitted on the training partition; each feature is then shuffled in the
+held-out **validation** partition (87,152 rows) and the drop in macro F1 is
+measured (`sklearn.inspection.permutation_importance`, `n_repeats=5`,
+`random_state=42`). The model never saw these rows, so the measure is
+leakage-free and model-agnostic, and it does not share the MDI bias toward
+continuous features.
+
+![Random Forest feature importance: MDI vs permutation](figures/feature_importance.png)
+
+| Rank | Feature | Permutation importance (macro F1 drop) |
+|---|---|---|
+| 1 | `Elevation` | 0.4779 |
+| 2 | `Horizontal_Distance_To_Roadways` | 0.2210 |
+| 3 | `Horizontal_Distance_To_Fire_Points` | 0.1646 |
+| 4 | `Wilderness_Area4` | 0.1028 |
+| 5 | `Horizontal_Distance_To_Hydrology` | 0.0810 |
+| 6 | `Vertical_Distance_To_Hydrology` | 0.0556 |
+| 7 | `Soil_Type10` | 0.0356 |
+| 8 | `Wilderness_Area1` | 0.0330 |
+| 9 | `Aspect` | 0.0314 |
+| 10 | `Hillshade_Noon` | 0.0291 |
+
+`Elevation` again dominates by a wide margin, and the three distance features
+remain the strongest numeric predictors, so the two measures agree on the head
+of the ranking. The difference is exactly the bias the MDI note predicted: the
+one-hot indicators climb once the high-cardinality advantage is removed —
+`Wilderness_Area4` rises to 4th (0.1028, vs 11th under MDI) and `Soil_Type10`,
+`Wilderness_Area1` and `Soil_Type3` enter the top 12. So the categorical
+location features matter more to the model's decisions than their low MDI
+scores suggest, while `Elevation` and the distance features are confirmed as the
+dominant drivers of the cover-type prediction.
+
+## Hyperparameter optimization
+
+Issue #29. Reproduce with: `python src/hyperparameter_optimization.py`
+
+- **Method:** `RandomizedSearchCV` (scikit-learn) under the shared protocol
+  (`StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`, scoring macro
+  F1), on the canonical train split (406,708 rows). Validation and test are
+  untouched. `Optuna` was rejected to avoid a new dependency and because its
+  pruning does not apply to Random Forest; `GridSearchCV` is too slow.
+- **Budget:** Random Forest `n_iter=10`, XGBoost `n_iter=30`.
+- **Features:** the search runs on the canonical `FEATURES` (the 54 cleaned raw
+  columns), without the engineered features of #18; the tuned results do not
+  include feature engineering.
+- **No leakage:** the search fits only on `X_train` / `y_train`; the best
+  estimator is re-evaluated with `baseline.evaluate_model` on the same folds.
+  The reported tuned score is slightly optimistic because the best parameters
+  were selected on those folds; the unbiased verdict is #28 (validation) and
+  #25 (test).
+
+### Default vs tuned (5-fold CV, macro F1)
+
+| Model | Default | Tuned |
+|---|---|---|
+| RandomForest (primary) | 0.9123 ± 0.0029 | **0.9326 ± 0.0019** |
+| XGBoost (secondary) | 0.8489 ± 0.0027 | **0.9240 ± 0.0016** |
+
+### Best parameters
+
+- **Random Forest:** `n_estimators=400`, `min_samples_split=5`,
+  `min_samples_leaf=1`, `max_features=None`, `max_depth=50`.
+- **XGBoost:** `learning_rate=0.05`, `n_estimators=300`, `max_depth=12`,
+  `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight=3`,
+  `reg_lambda=0.0`, `reg_alpha=1.0`.
+
+Tuning improves both models and makes them more stable (the std drops for both).
+Random Forest remains the primary model (0.9326); the tuned XGBoost (0.9240) is
+now a strong secondary, within ~0.9 points of the forest (its larger +7.5-point
+gain partly reflects a lower starting default of 0.8489). The tuned Random
+Forest grows 400 trees and lets each tree evaluate all 54 features
+(`max_features=None`) instead of a sample; the `max_depth=50` bound barely
+limits a tree on 406,708 rows with `min_samples_leaf=1`, so the gain is more
+plausibly driven by `max_features=None` than by the depth cap. That is a
+hypothesis — the search selects the best combination but does not isolate which
+parameter caused it. The actual overfitting gap is measured in #28, not here.
 
 ## Evaluation metrics
 
@@ -426,4 +506,82 @@ Issue #25. Reproduce with: `python src/final_metrics.py`
 
 ## Error analysis
 
-_To be filled in M5._
+Issue #27. Reproduce with: `python src/error_analysis.py`
+
+Same model and split as the *Results* section above (the exported pipeline of
+#32, fitted on the 406,708 training rows only). The analysis runs on the
+held-out **validation** partition (87,152 rows, 4,180 errors); the test
+partition gives the same picture and is printed alongside it by the module.
+
+![Error analysis: confused pairs and confidence](figures/error_analysis.png)
+
+### Most confused class pairs (validation, True → Pred)
+
+| True → Pred | Count | % of that class's errors | % of all errors |
+|---|---:|---:|---:|
+| 1 Spruce/Fir → 2 Lodgepole Pine | 1,852 | 95.4% | 44.3% |
+| 2 Lodgepole Pine → 1 Spruce/Fir | 943 | 81.5% | 22.6% |
+| 5 Aspen → 2 Lodgepole Pine | 312 | 87.9% | 7.5% |
+| 6 Douglas-fir → 3 Ponderosa Pine | 189 | 65.9% | 4.5% |
+| 7 Krummholz → 1 Spruce/Fir | 149 | 92.6% | 3.6% |
+
+- **One confusion dominates.** The reciprocal Spruce/Fir ↔ Lodgepole Pine
+  confusion is 2,795 of the 4,180 validation errors (**66.9%**). These are the
+  two majority classes (31,776 and 42,495 rows) and account for the model's two
+  lowest per-class precisions once their large support is considered.
+- **Every minority class leaks into a single neighbour.** Aspen's errors are
+  almost entirely → Lodgepole Pine (87.9%), which explains its low recall
+  (0.751, the worst of the seven); Krummholz → Spruce/Fir (92.6%) and
+  Douglas-fir → Ponderosa Pine (65.9%) follow the same one-to-one pattern.
+  Errors are concentrated, not spread across all classes — a few decision
+  boundaries, not a globally weak model.
+
+### Why they are confused — Elevation overlap
+
+`Elevation` is the single most discriminative feature (η² 0.616; top of #26).
+For the dominant pair it cleanly explains the confusion:
+
+| Group (validation) | Rows | Elevation mean | Elevation std |
+|---|---:|---:|---:|
+| True Spruce/Fir, predicted Spruce/Fir (correct) | 29,835 | 3,139 m | 153 |
+| True Spruce/Fir, predicted Lodgepole Pine (confused) | 1,852 | 2,941 m | 142 |
+| True Lodgepole Pine (reference) | 42,495 | 2,920 m | 185 |
+
+The misclassified Spruce/Fir rows sit ~200 m below the correctly classified
+ones, right on top of the Lodgepole Pine mean (2,941 m vs 2,920 m). Spruce/Fir
+trees at the low end of their elevation band fall inside Lodgepole Pine's range,
+so the overlap is a genuine property of the data, not a model defect.
+
+### Inspecting the misclassified rows — confidence
+
+| Prediction | Rows | Mean confidence | Median | Share below 0.5 |
+|---|---:|---:|---:|---:|
+| Correct | 82,972 | 0.889 | 0.93 | 0.4% |
+| Misclassified | 4,180 | 0.624 | 0.60 | 8.0% |
+
+Errors sit at markedly lower confidence (top `predict_proba`) than correct
+predictions and cluster near the 0.5–0.65 boundary (right panel of the figure):
+most mistakes are borderline cases, not confident blunders. A residual tail of
+high-confidence errors remains — e.g. Krummholz → Spruce/Fir and Lodgepole Pine
+→ Spruce/Fir at 0.98 — where the features genuinely point at the wrong class.
+
+### Proposed improvements
+
+1. **Separate the Spruce/Fir ↔ Lodgepole Pine boundary (biggest payoff).** Two
+   thirds of all errors live here. Hyperparameter tuning (#29) that grows deeper
+   / less constrained trees, or a feature that sharpens the elevation–wilderness
+   interaction (#18), targets exactly this boundary. Worth re-running this
+   analysis after #29 to confirm the pair shrinks.
+2. **Help the minority classes that collapse into one neighbour.** Aspen,
+   Douglas-fir and Krummholz each lose to a single class. Imbalance handling was
+   already evaluated in #17 and did not help global macro F1, but a targeted,
+   pair-aware approach (class weights tuned for these specific classes, or
+   engineered features that separate Aspen from Lodgepole Pine) is a more
+   promising lever than generic resampling.
+3. **Expose model confidence in the app.** Because errors concentrate below ~0.65
+   confidence, surfacing the predicted probability (and optionally flagging
+   low-confidence predictions for review) lets the Streamlit app communicate
+   uncertainty where the model is in fact unsure, at no modelling cost.
+
+These are diagnostic recommendations; acting on them belongs to #29 (tuning),
+#18 (feature engineering) and the app issues, not to this ticket.

@@ -51,7 +51,7 @@
 | 4 | Feature engineering y selección | ✅ Documentado (#18) |
 | 5 | Baseline | ⬜ Por documentar (hay trabajo hecho en el repo) |
 | 6 | Entrenamiento y validación | 🟡 Desbalanceo (#17), regresión logística (#20) y red neuronal (#24) documentados; faltan árboles y shortlist (#21–#23) |
-| 7 | Ajuste de hiperparámetros | ⬜ |
+| 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
 | 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
 | 9 | Análisis de errores e interpretación | ⬜ |
 | 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), pipeline exportado (#32) y CI en verde (#41); faltan el endpoint de feedback (#35) y el monitoreo de drift |
@@ -798,20 +798,27 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Vale la pena el tiempo? (suele mejorar menos que tener buenos datos y buenas variables) | ⬜ |
-| ¿Estamos sobreajustando a la validación de tanto probar combinaciones? | ⬜ |
+| ¿Vale la pena el tiempo? (suele mejorar menos que tener buenos datos y buenas variables) | ✅ Sí: Random Forest +2,0 pp y XGBoost +7,5 pp de macro F1, ambos más estables (D7.1) |
+| ¿Estamos sobreajustando a la validación de tanto probar combinaciones? | ✅ Se reconoce el sesgo: la búsqueda elige la mejor combinación sobre los mismos folds, así que el número afinado es optimista; el veredicto imparcial lo dan #28 (validación) y #25 (test) (D7.1) |
 
-#### D7.1 · (nombre de la decisión)  (⬜)
+#### D7.1 · Afinar Random Forest y XGBoost con RandomizedSearchCV  (✅)
 
-**Decisión:**
+**Decisión:** afinar los dos modelos del shortlist (Random Forest primario, XGBoost secundario) con `RandomizedSearchCV` bajo el protocolo común (5 folds estratificados, macro F1), sobre el train canónico y sin tocar validación ni test.
 
 **Justificación:**
+- **Método `RandomizedSearchCV`:** sin dependencia nueva (`Optuna` se descarta) y con presupuesto controlable; `GridSearchCV` sería combinatoriamente demasiado lento para Random Forest en 406.708 filas.
+- **Presupuesto rápido:** Random Forest `n_iter=10` y XGBoost `n_iter=30` (se redujo del exhaustivo 40/50 para no esperar horas).
+- **Resultado (5-fold CV, macro F1):**
+  - Random Forest: **0,9123 → 0,9326** (+2,0 puntos) y más estable (std 0,0029 → 0,0019).
+  - XGBoost: **0,8489 → 0,9240** (+7,5 puntos) y más estable (std 0,0027 → 0,0016).
+- **Mejores parámetros:** RF `n_estimators=400, max_depth=50, min_samples_leaf=1, min_samples_split=5, max_features=None`; XGBoost `learning_rate=0.05, n_estimators=300, max_depth=12, subsample=0.8, colsample_bytree=0.8, min_child_weight=3, reg_lambda=0, reg_alpha=1`.
+- **Sin fuga:** la búsqueda solo ajusta sobre `X_train`/`y_train`; el número afinado es un pelín optimista (elegimos la mejor combinación sobre esos folds) — el veredicto imparcial lo dan #28 (validación) y #25 (test).
 
-**Explicación sencilla:**
+**Explicación sencilla:** el modelo por defecto ya iba bien, pero venía "de fábrica". Probar varias configuraciones y quedarnos con la mejor fue como ajustar los mandos: Random Forest ganó 2 puntos de macro F1 usando más árboles (400) y dejando que cada árbol evalúe las 54 variables (`max_features=None`) en vez de una muestra; el tope de profundidad 50 apenas recorta los árboles con 406 mil filas, así que la mejora se atribuye a las variables como hipótesis (la búsqueda no aísla qué parámetro la causó). XGBoost subió 7,5 puntos, pero partía de un default flojo (0,8489), así que conviene no sobrevenderlo. Ambos quedaron además más estables entre los distintos pliegues.
 
-**Evidencia:**
+**Evidencia:** issue #29 · `src/hyperparameter_optimization.py` · `docs/MODELING.md` (*Hyperparameter optimization*) · `specs/feature-29-m5-hyperparameter-optimization-gridsearchcv-randomizedsearch-optuna.md`.
 
-**Responsable:**
+**Responsable:** @nagicome03.
 
 ---
 
