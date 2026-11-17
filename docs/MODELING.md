@@ -506,4 +506,82 @@ Issue #25. Reproduce with: `python src/final_metrics.py`
 
 ## Error analysis
 
-_To be filled in M5._
+Issue #27. Reproduce with: `python src/error_analysis.py`
+
+Same model and split as the *Results* section above (the exported pipeline of
+#32, fitted on the 406,708 training rows only). The analysis runs on the
+held-out **validation** partition (87,152 rows, 4,180 errors); the test
+partition gives the same picture and is printed alongside it by the module.
+
+![Error analysis: confused pairs and confidence](figures/error_analysis.png)
+
+### Most confused class pairs (validation, True → Pred)
+
+| True → Pred | Count | % of that class's errors | % of all errors |
+|---|---:|---:|---:|
+| 1 Spruce/Fir → 2 Lodgepole Pine | 1,852 | 95.4% | 44.3% |
+| 2 Lodgepole Pine → 1 Spruce/Fir | 943 | 81.5% | 22.6% |
+| 5 Aspen → 2 Lodgepole Pine | 312 | 87.9% | 7.5% |
+| 6 Douglas-fir → 3 Ponderosa Pine | 189 | 65.9% | 4.5% |
+| 7 Krummholz → 1 Spruce/Fir | 149 | 92.6% | 3.6% |
+
+- **One confusion dominates.** The reciprocal Spruce/Fir ↔ Lodgepole Pine
+  confusion is 2,795 of the 4,180 validation errors (**66.9%**). These are the
+  two majority classes (31,776 and 42,495 rows) and account for the model's two
+  lowest per-class precisions once their large support is considered.
+- **Every minority class leaks into a single neighbour.** Aspen's errors are
+  almost entirely → Lodgepole Pine (87.9%), which explains its low recall
+  (0.751, the worst of the seven); Krummholz → Spruce/Fir (92.6%) and
+  Douglas-fir → Ponderosa Pine (65.9%) follow the same one-to-one pattern.
+  Errors are concentrated, not spread across all classes — a few decision
+  boundaries, not a globally weak model.
+
+### Why they are confused — Elevation overlap
+
+`Elevation` is the single most discriminative feature (η² 0.616; top of #26).
+For the dominant pair it cleanly explains the confusion:
+
+| Group (validation) | Rows | Elevation mean | Elevation std |
+|---|---:|---:|---:|
+| True Spruce/Fir, predicted Spruce/Fir (correct) | 29,835 | 3,139 m | 153 |
+| True Spruce/Fir, predicted Lodgepole Pine (confused) | 1,852 | 2,941 m | 142 |
+| True Lodgepole Pine (reference) | 42,495 | 2,920 m | 185 |
+
+The misclassified Spruce/Fir rows sit ~200 m below the correctly classified
+ones, right on top of the Lodgepole Pine mean (2,941 m vs 2,920 m). Spruce/Fir
+trees at the low end of their elevation band fall inside Lodgepole Pine's range,
+so the overlap is a genuine property of the data, not a model defect.
+
+### Inspecting the misclassified rows — confidence
+
+| Prediction | Rows | Mean confidence | Median | Share below 0.5 |
+|---|---:|---:|---:|---:|
+| Correct | 82,972 | 0.889 | 0.93 | 0.4% |
+| Misclassified | 4,180 | 0.624 | 0.60 | 8.0% |
+
+Errors sit at markedly lower confidence (top `predict_proba`) than correct
+predictions and cluster near the 0.5–0.65 boundary (right panel of the figure):
+most mistakes are borderline cases, not confident blunders. A residual tail of
+high-confidence errors remains — e.g. Krummholz → Spruce/Fir and Lodgepole Pine
+→ Spruce/Fir at 0.98 — where the features genuinely point at the wrong class.
+
+### Proposed improvements
+
+1. **Separate the Spruce/Fir ↔ Lodgepole Pine boundary (biggest payoff).** Two
+   thirds of all errors live here. Hyperparameter tuning (#29) that grows deeper
+   / less constrained trees, or a feature that sharpens the elevation–wilderness
+   interaction (#18), targets exactly this boundary. Worth re-running this
+   analysis after #29 to confirm the pair shrinks.
+2. **Help the minority classes that collapse into one neighbour.** Aspen,
+   Douglas-fir and Krummholz each lose to a single class. Imbalance handling was
+   already evaluated in #17 and did not help global macro F1, but a targeted,
+   pair-aware approach (class weights tuned for these specific classes, or
+   engineered features that separate Aspen from Lodgepole Pine) is a more
+   promising lever than generic resampling.
+3. **Expose model confidence in the app.** Because errors concentrate below ~0.65
+   confidence, surfacing the predicted probability (and optionally flagging
+   low-confidence predictions for review) lets the Streamlit app communicate
+   uncertainty where the model is in fact unsure, at no modelling cost.
+
+These are diagnostic recommendations; acting on them belongs to #29 (tuning),
+#18 (feature engineering) and the app issues, not to this ticket.
