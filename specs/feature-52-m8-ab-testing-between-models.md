@@ -56,12 +56,27 @@ two variants, multi-armed bandits, UI for the results.
 
 Copied from issue #52 (optional, only if time allows):
 
-- [ ] Two model versions served
-- [ ] Traffic split and per-variant metrics collected
-- [ ] Winner decided with a documented rule
-- [ ] A/B test results documented
+- [x] Two model versions served
+- [x] Traffic split and per-variant metrics collected
+- [x] Winner decided with a documented rule
+- [x] A/B test results documented
 
 ## Verification / Result
 
-To be filled when the implementation is done: `python -m pytest`,
-`python src/ab_simulation.py` output, and a Docker run with `AB_TRAFFIC_B=0.5`.
+- `python -m pytest`: 44 passed (19 of them in `tests/test_ab_testing.py` plus the
+  existing suite). The only test excluded locally is the one that loads the real
+  exported model, because the local virtual environment has another scikit-learn
+  version than the one that exported it (see guide D10.5); CI skips it (no model).
+- `python src/export_challenger.py` (Docker): XGBoost 0.2.0, 19.6 MB, validation
+  accuracy 0.9471 and macro F1 0.9244; the serving contract check passes.
+- `python src/ab_simulation.py` (Docker, seed 42): offline McNemar p = 3.6e-16 in
+  favour of A in accuracy; 10,000 requests -> `inconclusive` (p = 0.08); 60,000
+  requests -> `winner_A` (-0.66 points, p = 0.0002); A/A control `inconclusive`
+  in both runs. Full tables in [docs/AB_TESTING.md](../docs/AB_TESTING.md).
+- Docker with `AB_TRAFFIC_B=0.5` and MySQL: `/health` reports `ab_test`, 40 requests
+  split 24 A / 16 B, `/ab/results` counts per variant (`insufficient_data`),
+  `?variant=B` serves B, `?variant=C` returns 422, and a row stored before the
+  migration appears as variant A.
+
+Known limits (see the document): accuracy is the criterion, while macro F1 is
+the project metric and favours B; the simulation labels every request.

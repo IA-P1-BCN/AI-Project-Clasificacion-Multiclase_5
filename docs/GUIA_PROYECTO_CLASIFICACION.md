@@ -1101,6 +1101,22 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 
 ---
 
+#### D10.10 · Test A/B entre dos modelos  (✅)
+
+**Decisión:** comparar en producción dos modelos con un test A/B. A (control) es el Random Forest 0.1.0 sin ajustar y B (challenger) es el XGBoost 0.2.0 ajustado en #29, exportado a `models/model_b.joblib` con `src/export_challenger.py`. La variable `AB_TRAFFIC_B` (0 a 1, por defecto 0 = apagado) fija qué parte de las peticiones de `POST /predict` va a B, elegida al azar. La variante se guarda en la columna `variant` de `predictions` y se devuelve en la respuesta. `GET /ab/results` da la exactitud en vivo de cada variante, calculada con el feedback de #35, y la decisión. Regla: al menos 200 feedbacks por variante y solo hay ganador si el test z de dos proporciones da p < 0,05 y la diferencia es de al menos 0,5 puntos; si no, el resultado es `inconclusive`.
+
+**Justificación:** se reutilizó el almacenamiento y el feedback que ya existían, de modo que el test no añade ninguna dependencia nueva. Se eligió XGBoost como challenger porque es otra familia de modelos y pesa 19,6 MB frente a los 136,3 MB del Random Forest actual. Resultados con el conjunto de validación (seed 42): A tiene exactitud 0,9520 y macro F1 0,9186, y B tiene 0,9471 y 0,9244. Con 10.000 peticiones simuladas la regla dice `inconclusive` (-0,78 puntos, p = 0,08) porque faltan datos; con 60.000 dice `winner_A` (-0,66 puntos, p = 0,0002). Un control A/A, donde B sirve el mismo modelo que A, no declara ganador. Para detectar medio punto hacen falta unos 30.000 feedbacks por variante.
+
+**Limitación:** la regla decide por exactitud porque es lo que mide el feedback de cada petición, pero la métrica principal del proyecto es el macro F1, y en ella B es mejor. El ganador es un veredicto de exactitud, no de macro F1; calcular el macro F1 en vivo por variante queda sin implementar. En la simulación la clase real de cada fila hace de feedback, mientras que en producción el feedback sería parcial y quizá sesgado. 🟡 en este punto: falta probarlo con tráfico real.
+
+**Explicación sencilla:** probar dos recetas dando cada una a la mitad de los clientes y contar cuál aprueba más. Con pocos clientes no se puede saber quién gana; con muchos sí.
+
+**Evidencia:** issue #52 · `src/ab_testing.py`, `src/ab_simulation.py`, `src/export_challenger.py`, `src/database.py`, `app/api.py` · `docs/AB_TESTING.md` · `specs/feature-52-m8-ab-testing-between-models.md` · `tests/test_ab_testing.py`. Probado en Windows con Docker Desktop: con `AB_TRAFFIC_B=0.5`, 40 peticiones se repartieron 24 a A y 16 a B, `?variant=B` devolvió B, `?variant=C` dio 422 y una fila guardada antes de la migración quedó como variante A en MySQL.
+
+**Responsable:** @Leandroletoile.
+
+---
+
 # Los 5 errores más comunes (checklist de equipo)
 
 - [ ] **1. Preprocesar antes del split** (fuga de datos). → Primero se reparte, luego se preprocesa. **Estado: parcial.** `feature_scaling.py` (#14), `logistic_regression.py` (#20), `neural_network.py` (#24), `export_model.py` (#32) y `final_metrics.py` (#25) ajustan exclusivamente sobre `train` dentro de un `Pipeline`. Las variables de #18 no aprenden nada de los datos. El EDA usó el dataset completo (ver R1).

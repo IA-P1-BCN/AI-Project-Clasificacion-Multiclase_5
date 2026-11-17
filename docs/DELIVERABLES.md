@@ -137,4 +137,5 @@ Status across the four delivery levels defined in [README.md](../README.md) and
 | Feature engineering & selection | ✅ Done | [PREPROCESSING.md](PREPROCESSING.md), [src/feature_engineering.py](../src/feature_engineering.py) (#18) |
 | Neural network with multiclass support (`MLPClassifier`) | ✅ Done | [MODELING.md](MODELING.md), [src/neural_network.py](../src/neural_network.py) (#24) — `python src/neural_network.py` |
 | Quality-gated model promotion on retraining | ✅ Done | `retrain_pipeline(..., promote=True, min_macro_f1=0.90)` in [src/retraining.py](../src/retraining.py) (#36) |
-| Model interpretability (`SHAP`), A/B testing, data drift monitoring | ⬜ Optional (`Could`) | Tracked in #30, #52 and #53 |
+| A/B testing between two models (two served versions, traffic split, winner rule) | ✅ Done | [AB_TESTING.md](AB_TESTING.md), [src/ab_testing.py](../src/ab_testing.py), [src/ab_simulation.py](../src/ab_simulation.py) (#52) — `python src/ab_simulation.py` |
+| Model interpretability (`SHAP`), data drift monitoring | ⬜ Optional (`Could`) | Tracked in #30 and #53 |

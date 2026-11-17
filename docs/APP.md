@@ -91,6 +91,7 @@ Interactive documentation (Swagger): <http://localhost:8000/docs>.
 | `POST /predict` | Validates the input and returns the predicted cover type with its confidence. |
 | `POST /feedback` | Stores the observed true cover type for a past prediction (#35). |
 | `GET /metrics` | Returns basic production-monitoring metrics from the collected feedback (#35). |
+| `GET /ab/results` | A/B test between two models: metrics per variant and the winner decision (#52, see [AB_TESTING.md](AB_TESTING.md)). `POST /predict` then also returns the `variant` that served the request and accepts `?variant=A\|B` to force it. |
 
 Example request body (`POST /predict`):
 
@@ -479,6 +480,8 @@ defaults); change `MODEL_PATH` only to load a model from a non-default path:
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
 | `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
 | `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
+| `MODEL_B_PATH` | `models/model_b.joblib` | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional: without the file everything is served by `MODEL_PATH`. |
+| `AB_TRAFFIC_B` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
 | `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
 
 ### Readiness and health checks

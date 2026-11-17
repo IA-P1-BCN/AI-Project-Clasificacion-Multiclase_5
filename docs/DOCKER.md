@@ -94,6 +94,8 @@ only; change every password before any shared or cloud deployment (#39).
 | `MYSQL_PORT` | `3306` | host | Host port published for MySQL. Set it when 3306 is taken. |
 | `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` | `api`, `app` | Where `src/database.py` connects. Inside Compose the host is `db`, always port 3306. |
 | `MODEL_PATH` | `/app/models/model.joblib` | `api` | Model file loaded by the API inside the container. |
+| `MODEL_B_PATH` | `/app/models/model_b.joblib` | `api` | Challenger model of the A/B test (#52); optional. |
+| `AB_TRAFFIC_B` | `0` | `api` | Share of requests (0 to 1) sent to the challenger. `0` = A/B test off. Restart `api` after changing it. |
 | `API_URL` | `http://api:8000` | `app` | Backend URL for the frontend. Nothing uses it yet: the prediction form is #33. |
 
 ## The image
