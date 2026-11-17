@@ -264,3 +264,104 @@ def test_prediction_inputs_returns_the_latest_rows_oldest_first(tmp_path):
     assert {"created_at_utc", "Wilderness_Area", "Soil_Type"} <= set(rows[0])
     assert len(database.prediction_inputs(db_url=url)) == 5
     assert list(pd.DataFrame(rows).columns[:2]) == ["id", "created_at_utc"]
+
+
+# ---- check and alert ----
+
+def test_check_and_alert_logs_and_notifies(reference, monkeypatch, caplog):
+    sent = []
+
+    def fake_urlopen(request, timeout=None):
+        sent.append(json.loads(request.data))
+        return _Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    rows = with_ids(make_inputs(500, seed=14, elevation_shift=300))
+    with caplog.at_level("WARNING", logger="uvicorn.error"):
+        window = dm.check_and_alert(reference, rows, 500, "https://example.invalid/hook")
+    assert window["status"] == "alert" and window["notified"] is True
+    assert sent and sent[0]["status"] == "alert"
+    assert "Data drift ALERT" in caplog.text
+
+
+def test_check_and_alert_is_quiet_without_drift(reference, monkeypatch):
+    calls = []
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: calls.append(1))
+    window = dm.check_and_alert(reference, with_ids(make_inputs(500, seed=15)), 500, "https://example.invalid/hook")
+    assert window["status"] == "ok" and window["notified"] is None and calls == []
+
+
+def test_check_and_alert_without_webhook_or_rows(reference):
+    rows = with_ids(make_inputs(500, seed=16, elevation_shift=300))
+    assert dm.check_and_alert(reference, rows, 500)["notified"] is None
+    assert dm.check_and_alert(reference, rows.iloc[0:0], 500) is None
+
+
+def test_check_frequency_reads_the_environment(monkeypatch):
+    monkeypatch.delenv("DRIFT_CHECK_EVERY", raising=False)
+    assert dm.drift_check_every() == 500
+    for value, expected in (("0", 0), ("250", 250), ("abc", 500), ("-3", 500)):
+        monkeypatch.setenv("DRIFT_CHECK_EVERY", value)
+        assert dm.drift_check_every() == expected
+
+
+# ---- API (skipped when FastAPI is not installed) ----
+
+@pytest.fixture
+def api(reference):
+    module = pytest.importorskip("app.api")
+    module.app.state.drift_reference = reference
+    module.app.state.drift_error = None
+    module.app.state.drift_check_every = 500
+    return module
+
+
+def test_drift_endpoint_reports_the_windows(api, reference, monkeypatch):
+    rows = with_ids(pd.concat(
+        [make_inputs(500, seed=20), make_inputs(500, seed=21, elevation_shift=300)], ignore_index=True
+    ))
+    monkeypatch.setattr(api, "prediction_inputs", lambda limit=5000, db_url=None: rows.tail(limit).to_dict("records"))
+    monkeypatch.setattr(api, "WINDOW_SIZE", 500)
+    response = api.drift(windows=2)
+    api.DriftResponse.model_validate(response)  # the dict fits the response schema
+    assert response["status"] == "alert" and response["latest"]["alerts"][0]["feature"] == "Elevation"
+    assert [window["status"] for window in response["history"]] == ["ok"]
+    assert response["reference"]["n_rows"] == reference["n_rows"]
+
+
+def test_drift_endpoint_without_predictions_or_reference(api, monkeypatch):
+    monkeypatch.setattr(api, "prediction_inputs", lambda limit=5000, db_url=None: [])
+    response = api.drift(windows=3)
+    api.DriftResponse.model_validate(response)
+    assert response["status"] == "insufficient_data" and response["latest"] is None and response["history"] == []
+    api.app.state.drift_reference = None
+    api.app.state.drift_error = "no reference"
+    with pytest.raises(api.HTTPException) as error:
+        api.drift(windows=3)
+    assert error.value.status_code == 503
+
+
+def test_drift_check_is_due_every_n_predictions(api):
+    assert api.drift_check_due(500) and api.drift_check_due(1000)
+    assert not api.drift_check_due(499) and not api.drift_check_due(None)
+    api.app.state.drift_check_every = 0
+    assert not api.drift_check_due(500)
+    api.app.state.drift_check_every = 500
+    api.app.state.drift_reference = None
+    assert not api.drift_check_due(500)
+
+
+def test_background_check_alerts_and_never_raises(api, monkeypatch, caplog):
+    rows = with_ids(make_inputs(500, seed=22, elevation_shift=300))
+    monkeypatch.setattr(api, "prediction_inputs", lambda limit=5000, db_url=None: rows.to_dict("records"))
+    monkeypatch.setattr(api, "WINDOW_SIZE", 500)
+    monkeypatch.delenv("DRIFT_WEBHOOK_URL", raising=False)
+    with caplog.at_level("WARNING", logger="uvicorn.error"):
+        api.run_drift_check()
+    assert "Data drift ALERT" in caplog.text
+
+    def broken(limit=5000, db_url=None):
+        raise OSError("database down")
+
+    monkeypatch.setattr(api, "prediction_inputs", broken)
+    api.run_drift_check()  # a failing database must not raise

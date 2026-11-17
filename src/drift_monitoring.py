@@ -52,6 +52,15 @@ def _env_int(name: str, default: int) -> int:
 WINDOW_SIZE = _env_int("DRIFT_WINDOW", 500)
 
 
+def drift_check_every() -> int:
+    """Predictions between automatic drift checks (DRIFT_CHECK_EVERY, default 500; 0 = off)."""
+    try:
+        value = int(os.getenv("DRIFT_CHECK_EVERY", "500"))
+    except ValueError:
+        return 500
+    return value if value >= 0 else 500
+
+
 # ---------------------------------------------------------------- reference and metric
 
 def inputs_from_features(X: pd.DataFrame) -> pd.DataFrame:
@@ -235,6 +244,25 @@ def send_webhook(url: str, payload: dict, timeout: float = 5.0) -> bool:
         return False
 
 
+def check_and_alert(reference: dict, rows: pd.DataFrame, window_size: int = WINDOW_SIZE,
+                    webhook_url: str | None = None) -> dict | None:
+    """Status of the latest window of `rows`; a warning or an alert is logged and sent to the webhook.
+
+    Returns the window report plus `notified` (True or False when a webhook was
+    tried, None otherwise), or None if there are no rows.
+    """
+    if rows.empty:
+        return None
+    window = windows_report(reference, rows, window_size, n_windows=1)["windows"][-1]
+    window["notified"] = None
+    if should_alert(window):
+        message = alert_message(window)
+        logger.warning(message["text"])
+        if webhook_url:
+            window["notified"] = send_webhook(webhook_url, message)
+    return window
+
+
 # -------------------------------------------------------------------------- simulation
 
 def shift_elevation(meters: float):
@@ -333,7 +361,7 @@ def check_command(args: list) -> int:
     if rows.empty:
         print("No predictions stored yet.")
         return 0
-    window = windows_report(reference, rows, WINDOW_SIZE, n_windows=1)["windows"][-1]
+    window = check_and_alert(reference, rows, WINDOW_SIZE, os.getenv("DRIFT_WEBHOOK_URL"))
     print(f"== Drift check: latest {window['rows']} predictions (ids {window['first_id']}-{window['last_id']}) ==")
     print(f"Status: {window['status']}")
     if window["status"] == "insufficient_data":
@@ -342,9 +370,8 @@ def check_command(args: list) -> int:
     print(f"Max PSI: {window['max_psi']:.4f} ({window['max_feature']})")
     for item in window["alerts"]:
         print(f"  {item['level']:<8}{item['feature']:<36}PSI {item['psi']:.4f}")
-    url = os.getenv("DRIFT_WEBHOOK_URL")
-    if url and should_alert(window):
-        print("Webhook:", "sent" if send_webhook(url, alert_message(window)) else "failed")
+    if window["notified"] is not None:
+        print("Webhook:", "sent" if window["notified"] else "failed")
     return exit_code(window)
 
 
