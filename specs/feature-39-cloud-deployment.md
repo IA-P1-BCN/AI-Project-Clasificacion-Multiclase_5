@@ -114,6 +114,12 @@ FastAPI healthy, Streamlit `/_stcore/health` = `ok` after ~60 s,
 `/predict` on the sample above returns `Lodgepole Pine` (0.95), memory
 1.171 GiB.
 
+After merging `origin/develop` (2f3d2b9: Streamlit frontend #33, Compose
+`api` service #38, unit tests #40), rebuilt image: `--check` passes,
+`pytest` 23 passed, and the Space simulation with the real model serves the
+new UI (Streamlit `AppTest`: *Predecir* button -> `Lodgepole Pine`, 90.0 %,
+no errors), memory 1.237 GiB.
+
 Not verified: building `deploy/huggingface/Dockerfile` itself (it clones
 `develop`, which does not contain these changes until the merge) and the
 public Space URL, which needs a Hugging Face account.
