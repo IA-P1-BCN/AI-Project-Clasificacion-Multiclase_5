@@ -10,106 +10,111 @@
 
 ## Goal
 
-Select the cloud provider (**Render**), add the declarative deployment
-configuration (`render.yaml`) and cloud startup entrypoint
-(`scripts/start_cloud.py`) so a fresh Git clone deployed to Render serves both
-the Streamlit frontend and the FastAPI backend (`/health`, `/predict`,
-`/feedback`, `/metrics`) without manual intervention, and document the
-deployment and verification procedure in `docs/APP.md`.
+Deploy the Streamlit frontend and the FastAPI backend (`/health`, `/predict`,
+`/feedback`, `/metrics`) to a free cloud host **serving the real exported
+model**, with a reproducible startup entrypoint (`scripts/start_cloud.py`) and
+the deployment procedure documented in `docs/APP.md`.
 
 ## Scope
 
 - In scope:
-  - Provider selection and justification (**Render** Docker Web Service over
-    Vercel and AWS).
-  - `render.yaml`: Render Blueprint declaring the Docker web service, runtime
-    environment variables (`PORT`, `SERVICE_ROLE`, `API_URL`, `MODEL_PATH`,
-    `DATABASE_URL`) and health check path (`/_stcore/health`).
-  - `scripts/start_cloud.py`: cloud container entrypoint that:
-    1. Verifies whether `MODEL_PATH` (`models/model.joblib`) exists; when
-       deploying from a clean Git checkout where `models/` and `data/raw/` are
-       git-ignored, builds and exports a lightweight, memory-safe fallback
-       `RandomForestClassifier` `Pipeline` (`model_version = "0.1.0-cloud-bootstrap"`)
-       that satisfies the 54-feature serving contract (`app.serving.load_model`).
-    2. Initializes the database schema (`src/database.py::init_db`, using the
-       configured `DATABASE_URL` or the built-in SQLite fallback).
-    3. Launches the FastAPI backend (`uvicorn app.api:app` on `127.0.0.1:8000`)
-       and the Streamlit frontend (`streamlit run app/main.py` on
-       `0.0.0.0:$PORT`) in `SERVICE_ROLE=all` mode (or either service
-       individually when `SERVICE_ROLE=api` / `SERVICE_ROLE=app`), and exposes a
-       reproducible `--check` mode that verifies `/health`, `/predict`,
-       `/feedback`, `/metrics` and Streamlit `/_stcore/health`.
-  - `docs/APP.md`: complete the `## Deployment` section with the provider
-    decision, cloud architecture, step-by-step Render deployment instructions
-    and verification commands.
+  - Provider selection and justification: **Hugging Face Spaces** (Docker SDK)
+    as primary target, Render (`render.yaml`) kept as alternative, Vercel and
+    Streamlit Community Cloud discarded.
+  - `deploy/huggingface/README.md` + `deploy/huggingface/Dockerfile`: the two
+    files of the Space repository. The Dockerfile clones this public GitHub
+    repository at build time (`REPO_REF`, default `develop`), runs as UID 1000
+    and starts `scripts/start_cloud.py` on port 7860.
+  - `scripts/start_cloud.py`:
+    1. `ensure_cloud_model`: keeps an existing `MODEL_PATH`; otherwise
+       downloads the exported model from `MODEL_URL` (atomic write, optional
+       `MODEL_SHA256` check, optional `MODEL_METADATA_URL`, optional
+       `HF_TOKEN`), failing loudly on any error; only without `MODEL_URL` does
+       it fit the synthetic bootstrap model (`0.1.0-cloud-bootstrap`), logging
+       a warning.
+    2. Initializes the database (`src/database.py::init_db`).
+    3. Runs FastAPI on loopback and Streamlit on `0.0.0.0:$PORT`
+       (`SERVICE_ROLE=all`, or `api` / `app` alone).
+    4. `--check`: self-cleaning end-to-end verification, including the
+       `MODEL_URL` download path through a `file://` URL and a rejected
+       SHA-256 mismatch.
+  - `render.yaml`: kept, with a header comment stating its memory limitation.
+  - `docs/APP.md`: `## Deployment` rewritten for Hugging Face Spaces.
 - Out of scope:
   - Editing `Dockerfile` or `docker-compose.yml` (#38, @carovasq).
-  - Building the interactive Streamlit prediction form in `app/main.py` (#33,
-    @nagicome03; once #33 merges into `develop`, Render auto-deploys the updated
-    UI without any change to `render.yaml`).
+  - Shrinking or retraining the model (modeling issues) to fit 512 MB tiers.
+  - Persistent cloud database: the Space uses ephemeral SQLite unless
+    `DATABASE_URL` points to an external MySQL server.
+  - The Streamlit prediction form (#33, @nagicome03).
 
 ## Design
 
 | File | Change |
 |---|---|
-| `render.yaml` | New. Render Blueprint configuring the Docker web service (`env: docker`, `plan: free`, `dockerCommand: python scripts/start_cloud.py`, `healthCheckPath: /_stcore/health`). |
-| `scripts/start_cloud.py` | New. `ensure_cloud_model`, `wait_for_url`, `run_self_check`, `run_services`, `main`. |
-| `docs/APP.md` | Expand `## Deployment` with provider selection (Render vs Vercel vs AWS), cloud startup flow, Render Blueprint deployment steps and URL verification. |
+| `deploy/huggingface/Dockerfile` | New. Space image: clone repo at `REPO_REF`, install requirements, `PORT=7860`, `CMD python scripts/start_cloud.py`. |
+| `deploy/huggingface/README.md` | New. Space card with front matter (`sdk: docker`, `app_port: 7860`). |
+| `scripts/start_cloud.py` | `sha256_of`, `download_file`, `fetch_remote_model`; `ensure_cloud_model` resolution order; `--check` step 1b; fixes in `label_mapping` call and `/metrics` keys. |
+| `render.yaml` | Header comment only. |
+| `docs/APP.md` | `## Deployment` section. |
 
 Decisions and reasons:
 
-- **Render over Vercel and AWS.**
-  - **Vercel** targets serverless functions and static frontends (250 MB bundle
-    limit, short request timeouts, no persistent WebSocket server for Streamlit).
-  - **AWS (App Runner / ECS)** requires IAM roles, ECR image pushes and billing
-    setup with no zero-config Git-connected Docker free tier.
-  - **Render** natively builds the repository's `Dockerfile` from GitHub via
-    `render.yaml`, offers a free tier (`plan: free`), injects `$PORT`, checks
-    `/_stcore/health` (or `/health`), and auto-deploys every merge to `develop`.
-- **Single-service default (`SERVICE_ROLE=all`) with `API_URL=http://127.0.0.1:8000`.**
-  On Render's free tier, separate web services spin down after 15 minutes of
-  inactivity and incur cross-service cold-start timeouts. Running `uvicorn` on
-  `127.0.0.1:8000` and `streamlit` on `0.0.0.0:$PORT` inside the same container
-  keeps frontend-to-backend latency sub-millisecond over loopback while still
-  allowing `SERVICE_ROLE=api` or `SERVICE_ROLE=app` if deployed as two services.
-- **Bootstrap model when `models/model.joblib` is absent in the cloud.**
-  Because `data/raw/covtype.data` (71.7 MiB) and `models/model.joblib` (136.3
-  MB) are git-ignored (Hard rule #5), a cloud container built from GitHub has
-  neither file, and training the full 406,708-row forest would exceed the 512 MB
-  RAM limit of a free cloud instance. `ensure_cloud_model()` leaves any existing
-  `models/model.joblib` untouched; only when the file is missing does it fit the
-  canonical `export_model.build_pipeline` on a small, deterministic 7-class
-  synthetic cartographic sample (`random_state=42`, 54 `FEATURES`, physical
-  bounds from `app/schemas.py`) so `/health` reports `model_loaded: true` and
-  `/predict` works immediately in the cloud.
-- **Zero conflict with #38.** `Dockerfile` and `docker-compose.yml` are not
-  modified, and only `## Deployment` in `docs/APP.md` is updated.
+- **Hugging Face Spaces over Render.** The exported model
+  (`RandomForestClassifier`, 100 trees, `max_depth=None`) is 136.3 MB on disk
+  and the running container uses ~1.17 GiB of RAM (`docker stats`). Render's
+  free plan has 512 MB, so on Render the app could only serve a synthetic
+  model whose predictions are not the project's. Free Spaces offer 16 GB RAM
+  and 2 vCPU, build Docker images, and sleep only after ~48 h idle.
+- **Vercel and Streamlit Community Cloud discarded.** Vercel is serverless
+  (250 MB bundle, no long-running Streamlit/WebSocket process). Streamlit
+  Community Cloud runs no FastAPI process, has ~1 GB RAM and needs the model
+  in GitHub (100 MB file limit, hard rule #5).
+- **Space clones GitHub instead of mirroring the repository.** Spaces reject
+  binary files outside LFS/Xet (`docs/figures/*.png`); cloning keeps the Space
+  to two text files and avoids any CI secret. Redeploy = *Factory rebuild*.
+- **Model hosted in a Hugging Face model repository, downloaded at startup.**
+  Keeps `*.joblib` out of Git (hard rule #5). Download uses `urllib` from the
+  standard library: **no new dependency**. `MODEL_SHA256` (from
+  `model_metadata.json`) guarantees the served model is the exported one.
+- **No silent fallback when `MODEL_URL` is set.** A misconfigured deployment
+  must fail instead of serving synthetic predictions.
 
 ## Acceptance criteria
 
-- [x] Choose provider (Render/Vercel/AWS)
+- [x] Choose provider (Render/Vercel/AWS) — Hugging Face Spaces, justified above
 - [x] Prepare deployment config
 - [ ] Deploy and verify public URL
 - [x] Document deployment steps
 - [ ] App accessible via a public URL
-- [ ] `python scripts/start_cloud.py --check` verifies model availability, database initialization, FastAPI (`/health`, `/predict`, `/feedback`, `/metrics`) and Streamlit (`/_stcore/health`) end-to-end and exits 0 (added)
+- [x] `python scripts/start_cloud.py --check` verifies model availability, `MODEL_URL` download, database initialization, FastAPI (`/health`, `/predict`, `/feedback`, `/metrics`) and Streamlit (`/_stcore/health`) end-to-end and exits 0 (added)
 
 ## Verification
 
 ```bash
-docker compose exec app python scripts/start_cloud.py --check
+docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
+  ai-project-clasificacion-multiclase_5-app python scripts/start_cloud.py --check
 ```
 
-Expected: verifies that `models/model.joblib` loads through `app.serving.load_model`,
-starts FastAPI and Streamlit on temporary local ports, checks HTTP 200 on
-`GET /health`, `POST /predict`, `POST /feedback`, `GET /metrics` and Streamlit
-`GET /_stcore/health`, cleans up temporary files if a bootstrap model was
-created, and exits 0.
+Observed (2026-11-17, project image, Python 3.11):
 
-Observed (2026-11-17):
+```
+1. Model artifact check: bootstrapped (71.6 KB)
+1b. MODEL_URL download check: downloaded + SHA-256 verified, mismatch rejected
+2. Database schema check: initialized (SQLite cloud fallback)
+3. FastAPI /health check: {'status': 'ok', 'model_loaded': True, 'db_connected': True, ...}
+4. FastAPI /predict check: cover_type=5 (Aspen), confidence=0.7272, prediction_id=1
+5. FastAPI /feedback & /metrics check: feedback_total=1, live_accuracy=1.0
+6. Streamlit /_stcore/health check: ok
+All cloud deployment checks passed.
+```
 
-- Provider chosen (**Render** via `render.yaml`), cloud entrypoint written in
-  `scripts/start_cloud.py`, and deployment steps documented in `docs/APP.md`
-  (all relative links verified: `All links in docs/APP.md resolve`).
-- Container self-check (`scripts/start_cloud.py --check`) and live Render URL
-  verification pending execution.
+Space runtime simulation with the real model (project image, UID 1000,
+`PORT=7860`, empty `MODEL_PATH`, `MODEL_URL=file:///remote/model.joblib`,
+`MODEL_SHA256` from `model_metadata.json`): logs `model status: downloaded`,
+FastAPI healthy, Streamlit `/_stcore/health` = `ok` after ~60 s,
+`/predict` on the sample above returns `Lodgepole Pine` (0.95), memory
+1.171 GiB.
+
+Not verified: building `deploy/huggingface/Dockerfile` itself (it clones
+`develop`, which does not contain these changes until the merge) and the
+public Space URL, which needs a Hugging Face account.

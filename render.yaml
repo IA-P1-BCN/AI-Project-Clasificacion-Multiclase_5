@@ -1,4 +1,8 @@
-# Render Blueprint for cloud deployment (issue #39).
+# Render Blueprint for cloud deployment (issue #39). ALTERNATIVE target: the
+# primary deployment is Hugging Face Spaces (deploy/huggingface/, docs/APP.md).
+# The real model needs ~1.2 GiB of RAM; on the free plan (512 MB) this service
+# serves the synthetic bootstrap model. On a larger plan, add MODEL_URL and
+# MODEL_SHA256 to download the real model at startup.
 # Deploy from https://dashboard.render.com -> New -> Blueprint -> select this repository.
 services:
   - type: web

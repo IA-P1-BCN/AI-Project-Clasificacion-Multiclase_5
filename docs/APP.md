@@ -458,63 +458,89 @@ The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
 
 ## Deployment
 
-Issue #39. Verify the cloud entrypoint, bootstrap model provisioning, database
-initialization, FastAPI endpoints and Streamlit readiness from the project root:
+Issue #39. The application is deployed to **Hugging Face Spaces** (Docker SDK).
+Verify the cloud entrypoint, model provisioning (including the `MODEL_URL`
+download path), database initialization, FastAPI endpoints and Streamlit
+readiness from the project root:
 
 ```bash
-docker compose exec app python scripts/start_cloud.py --check
+docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
+  ai-project-clasificacion-multiclase_5-app python scripts/start_cloud.py --check
 ```
 
-### Cloud provider choice: Render
+### Cloud provider choice: Hugging Face Spaces
 
-| Provider | Suitability for this stack | Decision |
-|---|---|---|
-| **Render** (Docker Web Service via `render.yaml`) | Builds the repository's [Dockerfile](../Dockerfile) directly from GitHub on the free tier, supports persistent WebSocket connections required by Streamlit, injects `$PORT`, runs HTTP health checks (`/_stcore/health`) and auto-deploys on every merge to `develop`. | **Chosen** |
-| **Vercel** | Designed for static frontends and short-lived serverless functions (250 MB bundle ceiling, execution timeouts, no long-running Docker container or Streamlit WebSocket server). | Discarded |
-| **AWS** (App Runner / ECS) | Supports Docker containers but requires IAM roles, ECR image registries and paid billing without a zero-config Git-triggered free tier. | Discarded |
+The exported model ([Model export](#model-export)) is a 100-tree
+`RandomForestClassifier` with `max_depth=None`: 136.3 MB on disk and
+**~1.17 GiB of RAM** once FastAPI + Streamlit are running (measured with
+`docker stats` on 2026-11-17). That rules out every free tier with 512 MB.
 
-### Cloud architecture and `render.yaml`
+| Provider | Free RAM | Real model fits | Decision |
+|---|---|---|---|
+| **Hugging Face Spaces** (Docker SDK) | 16 GB, 2 vCPU | Yes | **Chosen** |
+| Render (Docker web service, [render.yaml](../render.yaml)) | 512 MB | No (would need the synthetic bootstrap model or a smaller model) | Kept as alternative |
+| Streamlit Community Cloud | ~1 GB | Borderline; no FastAPI process, 100 MB GitHub file limit | Discarded |
+| Vercel | Serverless (250 MB bundle) | No; no long-running Streamlit/WebSocket server | Discarded |
 
-The declarative Render Blueprint lives in [render.yaml](../render.yaml) and uses
-[scripts/start_cloud.py](../scripts/start_cloud.py) as its entrypoint:
+Free Spaces sleep after ~48 h without traffic and their disk is ephemeral:
+the SQLite database (predictions and feedback) is reset on every restart or
+rebuild. Point `DATABASE_URL` to an external MySQL 8.0 server to persist it.
 
-1. **Single-container default (`SERVICE_ROLE=all`):** On Render's free tier,
-   separate web services spin down after inactivity and incur cross-service
-   cold-start delays. `scripts/start_cloud.py` starts the FastAPI backend
-   (`uvicorn app.api:app`) on loopback (`127.0.0.1:8000`), waits for
-   `GET /health` to return HTTP 200, sets `API_URL=http://127.0.0.1:8000`, and
-   launches the Streamlit frontend (`streamlit run app/main.py`) in the
-   foreground on `0.0.0.0:$PORT`. Setting `SERVICE_ROLE=api` or
-   `SERVICE_ROLE=app` runs either service standalone if split across two
-   containers.
-2. **Automatic model bootstrap (`ensure_cloud_model`):** Because
-   `data/raw/covtype.data` (71.7 MiB) and `models/model.joblib` (136.3 MB) are
-   git-ignored, a cloud build from GitHub starts without them, and fitting the
-   full 406,708-row forest would exceed the 512 MB RAM ceiling of a free cloud
-   instance. If `MODEL_PATH` already exists on a mounted disk, it is used as-is;
-   otherwise `ensure_cloud_model()` fits and exports a lightweight 7-class
-   `RandomForestClassifier` pipeline (`model_version = "0.1.0-cloud-bootstrap"`,
-   `random_state=42`) that satisfies the 54-feature serving contract so `/health`
-   reports `model_loaded: true` and `/predict` works immediately.
-3. **Database persistence:** In the cloud (`render.yaml`), `DATABASE_URL`
-   defaults to `sqlite:////app/data/processed/multiclass.db` so `/predict`,
-   `/feedback` and `/metrics` work without an external paid MySQL server; point
-   `DATABASE_URL` to a managed MySQL 8.0 URL to persist across container
-   rebuilds.
+### Cloud architecture
+
+The Space repository holds only two files, kept in this repository under
+[deploy/huggingface/](../deploy/huggingface/):
+
+- [deploy/huggingface/README.md](../deploy/huggingface/README.md): Space card
+  with the configuration front matter (`sdk: docker`, `app_port: 7860`).
+- [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile): builds on
+  `python:3.11-slim`, runs as UID 1000 (required by Spaces), clones this
+  public GitHub repository at `REPO_REF` (default `develop`), installs
+  [requirements.txt](../requirements.txt) and starts
+  [scripts/start_cloud.py](../scripts/start_cloud.py).
+
+This keeps binary files (`docs/figures/*.png`, `*.joblib`) out of the Space
+git repository and leaves the project [Dockerfile](../Dockerfile) (#38)
+untouched. At startup, `scripts/start_cloud.py`:
+
+1. **Provisions the model (`ensure_cloud_model`).** An existing `MODEL_PATH`
+   is used as-is. Otherwise, if `MODEL_URL` is set, the exported model is
+   downloaded to `MODEL_PATH`, checked against `MODEL_SHA256` (written to a
+   temporary file and renamed only if the checksum matches) and validated with
+   `app.serving.load_model`; any failure stops the container. Only when
+   `MODEL_URL` is unset does it fit a synthetic 30-tree bootstrap model
+   (`model_version = "0.1.0-cloud-bootstrap"`) and log a warning: its
+   predictions are **not** those of the project model.
+2. **Initializes the database** (`src/database.py::init_db`).
+3. **Starts FastAPI** (`uvicorn app.api:app`) on `127.0.0.1:$API_PORT`, waits
+   for `GET /health`, then runs **Streamlit** in the foreground on
+   `0.0.0.0:$PORT` (`SERVICE_ROLE=all`). `SERVICE_ROLE=api` / `app` runs a
+   single service.
+
+The model is hosted in a Hugging Face **model** repository, which stores large
+files natively and serves them at
+`https://huggingface.co/<owner>/<model-repo>/resolve/main/model.joblib`.
 
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
-lists the local Compose variables, and [render.yaml](../render.yaml) sets the
-cloud defaults:
+lists the local Compose variables; the Space
+[Dockerfile](../deploy/huggingface/Dockerfile) sets the cloud defaults and
+the Space settings add the model variables:
 
 | Variable | Default | Used by | Description |
 |---|---|---|---|
 | `SERVICE_ROLE` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
-| `PORT` | `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port injected by Render. |
+| `PORT` | `7860` (Space) / `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port; must match `app_port` in the Space card. Render injects it. |
+| `API_PORT` | `8000` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Loopback port of FastAPI in `SERVICE_ROLE=all`. |
 | `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
 | `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
-| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local & Render) | [src/database.py](../src/database.py) | Database connection string (#37). |
+| `MODEL_URL` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the exported `model.joblib`, downloaded when `MODEL_PATH` is missing. |
+| `MODEL_SHA256` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in `models/model_metadata.json`). Recommended. |
+| `MODEL_METADATA_URL` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional URL of `model_metadata.json`, saved next to the model. |
+| `HF_TOKEN` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional Bearer token, only if the model repository is private. Set it as a Space **secret**. |
+| `REPO_REF` | `develop` | [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile) (build arg) | Git branch or tag of this repository cloned into the Space. |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local & cloud) | [src/database.py](../src/database.py) | Database connection string (#37). |
 | `MYSQL_DATABASE` | `multiclass` | `db` container | MySQL database created on startup. |
 | `MYSQL_USER` | `app` | `db` container | MySQL application user. |
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
@@ -523,26 +549,45 @@ cloud defaults:
 
 ### Readiness and health checks
 
-- **Streamlit UI health check (`GET /_stcore/health`):** returns `ok` (HTTP 200)
-  and is used as `healthCheckPath` in [render.yaml](../render.yaml).
+- **Streamlit UI health check (`GET /_stcore/health`):** returns `ok` (HTTP 200).
+  Spaces mark the app as *Running* once `app_port` answers.
 - **FastAPI health check (`GET /health`):** returns HTTP 200 with `status`
   (`"ok"`), `model_loaded` (`bool`), `db_connected` (`bool`), `detail` and
-  `db_detail`.
+  `db_detail`. In `SERVICE_ROLE=all` it is only reachable inside the container.
 
-### Step-by-step cloud deployment on Render
+### Step-by-step deployment on Hugging Face Spaces
 
-1. Push the branch / merge into `develop` on GitHub
-   (`https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`).
-2. Sign in to [Render](https://dashboard.render.com), click **New +** →
-   **Blueprint**, and connect the repository
-   `IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`.
-3. Render automatically detects [render.yaml](../render.yaml) and provisions the
-   Docker web service `multiclass-covertype-app` on the `free` plan tracking
-   `develop`. Click **Apply**.
-4. Once the build finishes, Render starts `python scripts/start_cloud.py`,
-   verifies `GET /_stcore/health`, and publishes the application at its
-   `https://<service-name>.onrender.com` public URL (with `autoDeploy: true`,
-   any new merge to `develop` automatically triggers a redeploy).
+1. **Upload the model.** Sign in to <https://huggingface.co>, click
+   **New** → **Model**, create a public repository (e.g.
+   `<owner>/covertype-random-forest`) and, in **Files** → **Add file** →
+   **Upload files**, upload `models/model.joblib` and
+   `models/model_metadata.json` produced by `python src/export_model.py`.
+2. **Create the Space.** **New** → **Space**, SDK **Docker** → **Blank**,
+   hardware **CPU basic (free)**, visibility public.
+3. **Add the Space files.** In the Space **Files** tab, upload
+   [deploy/huggingface/README.md](../deploy/huggingface/README.md) and
+   [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile) to the
+   root, replacing the generated `README.md`.
+4. **Configure variables** in **Settings** → **Variables and secrets**:
+   - `MODEL_URL` = `https://huggingface.co/<owner>/covertype-random-forest/resolve/main/model.joblib`
+   - `MODEL_METADATA_URL` = `https://huggingface.co/<owner>/covertype-random-forest/resolve/main/model_metadata.json`
+   - `MODEL_SHA256` = value of `model_sha256` in `models/model_metadata.json`
+   - (optional) `REPO_REF` = branch to deploy, e.g. `feature/39-cloud-deployment`
+     before the merge into `develop`.
+5. **Build.** The Space builds automatically; the logs must show
+   `[start_cloud] model status: downloaded` and
+   `[start_cloud] FastAPI healthy at http://127.0.0.1:8000`. The app is public at
+   `https://huggingface.co/spaces/<owner>/<space>` (direct URL
+   `https://<owner>-<space>.hf.space`).
+6. **Redeploy after a merge.** The Space does not watch GitHub: use
+   **Settings** → **Factory rebuild** to clone the latest `REPO_REF`.
+
+### Alternative: Render
+
+[render.yaml](../render.yaml) remains available (**New +** → **Blueprint** on
+<https://dashboard.render.com>). On the free plan (512 MB) the real model does
+not fit, so the container serves the synthetic bootstrap model unless a paid
+instance with more memory is used together with `MODEL_URL` and `MODEL_SHA256`.
 
 ## Usage
 

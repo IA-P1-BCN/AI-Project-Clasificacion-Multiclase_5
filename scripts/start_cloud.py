@@ -1,7 +1,15 @@
 """Cloud deployment entrypoint and readiness verifier (issue #39).
 
+Primary target: Hugging Face Spaces (Docker SDK, see `deploy/huggingface/`);
+`render.yaml` is kept as an alternative.
+
+Model provisioning: an existing `MODEL_PATH` is used as-is; otherwise, when
+`MODEL_URL` is set, the exported model is downloaded (optionally checked
+against `MODEL_SHA256`); only when neither is available does it fall back to a
+synthetic bootstrap model.
+
 Supports three runtime modes via `SERVICE_ROLE`:
-- `all` (default in `render.yaml`): ensures a model artifact is present at
+- `all` (default): ensures a model artifact is present at
   `MODEL_PATH`, initializes the database, starts the FastAPI backend on
   `127.0.0.1:8000`, waits for `/health`, and runs the Streamlit frontend in the
   foreground on `0.0.0.0:$PORT`.
@@ -14,6 +22,7 @@ verification of the cloud bootstrap, FastAPI endpoints and Streamlit health chec
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -96,19 +105,111 @@ def build_bootstrap_dataset(rows_per_class: int = 200, random_state: int = RANDO
     return X, y
 
 
-def ensure_cloud_model(model_path: Path = MODEL_PATH) -> dict:
+def sha256_of(path: Path, chunk_size: int = 1 << 20) -> str:
+    """Return the hex SHA-256 digest of a file, read in chunks."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        for chunk in iter(lambda: fh.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_file(
+    url: str,
+    dest: Path,
+    expected_sha256: str | None = None,
+    token: str | None = None,
+    chunk_size: int = 1 << 20,
+) -> dict:
+    """Download `url` to `dest` atomically and optionally verify its SHA-256.
+
+    The file is written to a temporary sibling and renamed only after the
+    checksum matches, so a failed or partial download never leaves a broken
+    artifact at `dest`. `token` is sent as a Bearer token (private HF repos).
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_name(dest.name + ".part")
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with urllib.request.urlopen(req, timeout=60.0) as resp, tmp.open("wb") as fh:
+            for chunk in iter(lambda: resp.read(chunk_size), b""):
+                fh.write(chunk)
+                digest.update(chunk)
+                size += len(chunk)
+        actual = digest.hexdigest()
+        if expected_sha256 and actual != expected_sha256.strip().lower():
+            raise ValueError(f"SHA-256 mismatch for {url}: expected {expected_sha256}, got {actual}")
+        tmp.replace(dest)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return {"path": str(dest), "size_bytes": size, "sha256": actual}
+
+
+def fetch_remote_model(model_path: Path = MODEL_PATH, env: dict | None = None) -> dict | None:
+    """Download the exported model from `MODEL_URL` when it is not present yet.
+
+    Returns None when `MODEL_URL` is unset. When it is set, any failure (network,
+    checksum, serving contract) raises, so a misconfigured deployment fails
+    loudly instead of silently falling back to the synthetic bootstrap model.
+    `MODEL_METADATA_URL` (optional) fetches `model_metadata.json` next to it.
+    """
+    env = os.environ if env is None else env
+    url = (env.get("MODEL_URL") or "").strip()
+    if not url:
+        return None
+    model_path = Path(model_path)
+    if load_model(model_path).ready:
+        return {"status": "existing", "model_path": str(model_path)}
+
+    token = (env.get("HF_TOKEN") or "").strip() or None
+    info = download_file(url, model_path, env.get("MODEL_SHA256") or None, token)
+    metadata_url = (env.get("MODEL_METADATA_URL") or "").strip()
+    if metadata_url:
+        download_file(metadata_url, model_path.with_name("model_metadata.json"), token=token)
+
+    verified = load_model(model_path)
+    if not verified.ready:
+        raise RuntimeError(f"Downloaded model failed serving contract: {verified.error}")
+    return {
+        "status": "downloaded",
+        "model_path": str(model_path),
+        "size_bytes": info["size_bytes"],
+        "sha256": info["sha256"],
+    }
+
+
+def ensure_cloud_model(model_path: Path = MODEL_PATH, env: dict | None = None) -> dict:
     """Ensure a loadable 54-feature pipeline exists at `model_path`.
 
-    If `model_path` already exists and passes `load_model()`, it is kept untouched.
-    Otherwise, fits a lightweight 30-tree RandomForest pipeline on the
-    deterministic 7-class bootstrap dataset so cloud containers without the
-    git-ignored dataset start cleanly within a 512 MB RAM budget.
+    Resolution order:
+    1. `model_path` already exists and passes `load_model()`: kept untouched.
+    2. `MODEL_URL` is set: the real exported model is downloaded (see
+       `fetch_remote_model`); failures raise instead of falling back.
+    3. Otherwise, fits a lightweight 30-tree RandomForest pipeline on the
+       deterministic 7-class synthetic bootstrap dataset so a container without
+       the git-ignored artifacts still starts. Its predictions are NOT those of
+       the project model (`model_version = "0.1.0-cloud-bootstrap"`).
     """
     model_path = Path(model_path)
     loaded = load_model(model_path)
     if loaded.ready:
         return {"status": "existing", "model_path": str(model_path)}
 
+    remote = fetch_remote_model(model_path, env)
+    if remote is not None:
+        return remote
+
+    print(
+        "[start_cloud] WARNING: no model at MODEL_PATH and MODEL_URL is unset; "
+        "serving a synthetic bootstrap model, not the trained project model.",
+        flush=True,
+    )
     model_path.parent.mkdir(parents=True, exist_ok=True)
     X_boot, y_boot = build_bootstrap_dataset()
     pipeline = build_pipeline()
@@ -132,7 +233,7 @@ def ensure_cloud_model(model_path: Path = MODEL_PATH) -> dict:
             ),
             "random_state": RANDOM_STATE,
             "features": list(FEATURES),
-            "label_mapping": label_mapping(pipeline.classes_),
+            "label_mapping": label_mapping(pipeline),
         }
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
@@ -183,8 +284,24 @@ def run_self_check() -> int:
         db_path = tmp_path / "cloud_check.db"
         db_url = f"sqlite:///{db_path.as_posix()}"
 
-        model_info = ensure_cloud_model(model_path)
+        model_info = ensure_cloud_model(model_path, env={})
         print(f"1. Model artifact check: {model_info['status']} ({model_path.stat().st_size / 1024:.1f} KB)")
+
+        # Exercise the MODEL_URL download path offline through a file:// URL.
+        expected = sha256_of(model_path)
+        remote_env = {"MODEL_URL": model_path.as_uri(), "MODEL_SHA256": expected}
+        downloaded = ensure_cloud_model(tmp_path / "downloaded" / "model.joblib", env=remote_env)
+        assert downloaded["status"] == "downloaded" and downloaded["sha256"] == expected, downloaded
+        try:
+            fetch_remote_model(
+                tmp_path / "bad" / "model.joblib",
+                env={"MODEL_URL": model_path.as_uri(), "MODEL_SHA256": "0" * 64},
+            )
+        except ValueError:
+            assert not (tmp_path / "bad" / "model.joblib").exists()
+        else:
+            raise AssertionError("a SHA-256 mismatch must abort the download")
+        print("1b. MODEL_URL download check: downloaded + SHA-256 verified, mismatch rejected")
 
         init_db(db_url)
         print("2. Database schema check: initialized (SQLite cloud fallback)")
@@ -249,10 +366,10 @@ def run_self_check() -> int:
             )
             assert fb["is_correct"] is True, fb
             metrics = wait_for_url("http://127.0.0.1:18000/metrics", timeout_s=5.0)
-            assert isinstance(metrics, dict) and metrics.get("feedback_count") == 1, metrics
+            assert isinstance(metrics, dict) and metrics.get("feedback_total") == 1, metrics
             print(
-                f"5. FastAPI /feedback & /metrics check: feedback_count={metrics['feedback_count']}, "
-                f"accuracy={metrics['accuracy']}"
+                f"5. FastAPI /feedback & /metrics check: feedback_total={metrics['feedback_total']}, "
+                f"live_accuracy={metrics['live_accuracy']}"
             )
 
             st_health = wait_for_url("http://127.0.0.1:18501/_stcore/health", timeout_s=25.0)
