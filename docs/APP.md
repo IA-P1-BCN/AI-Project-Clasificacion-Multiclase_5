@@ -1,22 +1,79 @@
 # APP — Application Requirements
 
-> Requirements and design of the prediction application.
+> Requirements, architecture and usage of the prediction application. See
+> [SPEC.md](../SPEC.md) for the functional and technical specification and
+> [DELIVERABLES.md](DELIVERABLES.md) for delivery-level status.
+
+## Contents
+
+- [Functional requirements](#functional-requirements)
+- [Architecture](#architecture)
+- [Backend API (FastAPI)](#backend-api-fastapi)
+- [Model export](#model-export)
+- [Database integration](#database-integration)
+- [New data collection and retraining pipeline](#new-data-collection-and-retraining-pipeline)
+- [Dockerization](#dockerization)
+- [Deployment](#deployment)
+- [Usage](#usage)
 
 ## Functional requirements
 
-- Accepts input data and returns a multiclass prediction.
-- Streamlit (frontend) + FastAPI (backend) + model pipeline.
-- Feedback collection system to monitor production performance.
-- Pipeline to collect new data for future retraining.
+1. **Multiclass prediction from cartographic inputs.** Accepts the 10
+   quantitative cartographic features (`NUMERIC_FEATURES`), `Wilderness_Area`
+   (`1–4`) and `Soil_Type` (`1–40`) defined in
+   [DATA_DICTIONARY.md](DATA_DICTIONARY.md), expands the categorical selectors
+   into the 44 binary indicators (`BINARY_FEATURES`), and returns the predicted
+   `Cover_Type` (`1–7`), its species name (`class_name`), the winning class
+   probability (`confidence`), and the 7-class probability distribution
+   (`probabilities`).
+2. **Decoupled frontend, backend and model pipeline.**
+   - **Frontend (`Streamlit`):** [app/main.py](../app/main.py) provides the
+     user interface (M0 base environment merged; interactive prediction form
+     tracked in #33).
+   - **Backend (`FastAPI`):** [app/api.py](../app/api.py),
+     [app/serving.py](../app/serving.py) and
+     [app/schemas.py](../app/schemas.py) validate inputs and serve `/health`
+     and `/predict` (#34).
+   - **Exported pipeline (`joblib`):** [src/export_model.py](../src/export_model.py)
+     bundles the 54-feature `ColumnTransformer` and the fitted primary
+     `RandomForestClassifier` into `models/model.joblib` with versioned metadata
+     in `models/model_metadata.json` (#32).
+3. **Prediction logging and feedback collection.** Every `POST /predict` call is
+   logged on a best-effort basis to the `predictions` table (`prediction_id`),
+   and verified ground-truth labels are stored in the `feedback` table via
+   [src/database.py](../src/database.py) (#37; feedback endpoint and monitoring
+   UI tracked in #35).
+4. **New data ingestion and retraining pipeline.** Validated labeled observations
+   are stored in `data/processed/new_samples.csv` and used by
+   [src/retraining.py](../src/retraining.py) to retrain the pipeline on the
+   training partition only (#36).
 
 ## Architecture
 
 ```
-Streamlit (frontend) ──► FastAPI (backend) ──► model pipeline ──► prediction
-                              │
-                              ▼
-                        Database (MySQL/MongoDB)
+Streamlit (frontend, app/main.py)
+        │
+        ▼
+FastAPI (backend, app/api.py + app/schemas.py)
+        ├──► Serving layer (app/serving.py) ──► Pipeline (models/model.joblib, #32)
+        │                                                │
+        │                                                ▼
+        │                                     Multiclass prediction (1–7)
+        ▼
+Database (src/database.py: MySQL 8.0 in Docker / SQLite local fallback, #37)
+        │
+        ▼
+Retraining pipeline (src/retraining.py: train-only augmentation, #36)
 ```
+
+| Component | Module | Responsibility |
+|---|---|---|
+| Frontend UI | [app/main.py](../app/main.py) | Streamlit web interface on port `8501` (#1 base, #33 prediction form). |
+| HTTP API | [app/api.py](../app/api.py), [app/schemas.py](../app/schemas.py) | Pydantic input validation, `GET /health` and `POST /predict` on port `8000` (#34). |
+| Model serving | [app/serving.py](../app/serving.py) | Loads `models/model.joblib`, expands 12 compact fields into 54 `FEATURES`, computes 7-class probabilities (#34). |
+| Pipeline export | [src/export_model.py](../src/export_model.py) | Fits the `ColumnTransformer` + `RandomForestClassifier` pipeline on `X_train, y_train` only and writes `models/model.joblib` + `models/model_metadata.json` (#32). |
+| Persistence | [src/database.py](../src/database.py) | Creates and queries the `predictions` and `feedback` tables in MySQL 8.0 or local SQLite (#37). |
+| Retraining | [src/retraining.py](../src/retraining.py) | Validates and deduplicates new labeled rows in `data/processed/new_samples.csv` and retrains without data leakage (#36). |
 
 ## Backend API (FastAPI)
 
@@ -32,6 +89,8 @@ Interactive documentation (Swagger): <http://localhost:8000/docs>.
 |---|---|
 | `GET /health` | Service status, whether a model is loaded and whether the database is reachable (`db_connected`, `db_detail`). |
 | `POST /predict` | Validates the input and returns the predicted cover type with its confidence. |
+| `POST /feedback` | Stores the observed true cover type for a past prediction (#35). |
+| `GET /metrics` | Returns basic production-monitoring metrics from the collected feedback (#35). |
 
 Example request body (`POST /predict`):
 
@@ -91,6 +150,80 @@ Cover_Type (1-7) or the encoded labels (0-6) of #15.
 
 If the file is missing or invalid the API still starts: `/health` returns
 `model_loaded: false` with the reason, and `/predict` returns HTTP 503.
+
+## Feedback collection and monitoring
+
+Issue #35. The system closes the loop between a prediction and its observed
+outcome, and exposes how the deployed model is doing on real data. Feedback is
+stored in the `feedback` table (#37), linked to the `predictions` row it refers
+to.
+
+### `POST /feedback`
+
+Records the true cover type for a prediction returned earlier by `POST /predict`
+(the response of which includes a `prediction_id`). The stored row keeps a UTC
+timestamp, the true class and whether the original prediction was correct.
+
+Request body:
+
+```json
+{ "prediction_id": 1, "true_cover_type": 2, "comment": "Verified in the field." }
+```
+
+| Field | Allowed values |
+|---|---|
+| `prediction_id` | integer ≥ 1 — the id returned by `POST /predict` |
+| `true_cover_type` | integer 1 to 7 |
+| `comment` | optional free text, up to 1000 characters |
+
+Response:
+
+```json
+{
+  "feedback_id": 1, "prediction_id": 1,
+  "true_cover_type": 2, "true_class_name": "Lodgepole Pine",
+  "predicted_cover_type": 2, "is_correct": true
+}
+```
+
+| Status | When |
+|---|---|
+| `200` | Feedback stored. |
+| `404` | `prediction_id` does not exist. |
+| `422` | Missing, extra or out-of-range field (e.g. `true_cover_type` outside 1-7). |
+| `503` | Database unreachable; the feedback was not stored. |
+
+### `GET /metrics`
+
+Aggregates the collected feedback into basic production metrics. Counters start
+at zero and ratios are `null` until there is data, so the endpoint works from
+the first request.
+
+```json
+{
+  "predictions_total": 2, "feedback_total": 2, "feedback_coverage": 1.0,
+  "correct_total": 1, "live_accuracy": 0.5, "average_confidence": 0.9,
+  "per_class": [
+    { "cover_type": 1, "class_name": "Spruce/Fir", "feedback_count": 1, "correct": 0, "accuracy": 0.0 },
+    { "cover_type": 2, "class_name": "Lodgepole Pine", "feedback_count": 1, "correct": 1, "accuracy": 1.0 }
+  ]
+}
+```
+
+- **`live_accuracy`** — accuracy measured on labelled feedback (`correct_total /
+  feedback_total`); the production counterpart of the offline accuracy in
+  `docs/MODELING.md`.
+- **`feedback_coverage`** — share of predictions that received feedback.
+- **`average_confidence`** — mean model confidence of the predictions that were
+  given feedback.
+- **`per_class`** — feedback count and accuracy per true `Cover_Type` (1-7), to
+  spot which classes degrade in production.
+
+Reproduce the storage and metrics checks without the server:
+
+```bash
+python src/database.py
+```
 
 ## Model export
 
@@ -177,6 +310,7 @@ Environment variables (see `.env.example`):
 | `MYSQL_USER` | `app` | Application database user |
 | `MYSQL_PASSWORD` | `app` | Application database password |
 | `MYSQL_ROOT_PASSWORD` | `root` | MySQL root password (used by healthcheck) |
+| `MYSQL_PORT` | `3306` | Host port published for MySQL; set it (e.g. `3307`) if 3306 is taken |
 | `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` | Connection URL read by `src/database.py` |
 
 ### Schema
@@ -309,28 +443,133 @@ stored_df = load_new_samples()
 
 ## Dockerization
 
-- `Dockerfile` + `docker-compose.yml`
-- Services: app (backend + frontend), database (optional)
+The containerized environment is defined in [Dockerfile](../Dockerfile) and
+[docker-compose.yml](../docker-compose.yml) (#1, #37; multi-service frontend +
+backend orchestration added in #38; detailed usage guide in [DOCKER.md](DOCKER.md), #47):
+
+| Service | Container | Image / Build | Port | Purpose |
+|---|---|---|---|---|
+| `api` | `multiclass_api` | Built from [Dockerfile](../Dockerfile), command overridden to `uvicorn app.api:app` | `8000:8000` | FastAPI backend; serves the model from the read-only `./models` mount and persists to `db` |
+| `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Streamlit frontend with mounted `./app`, `./src`, `./data` and `./models` volumes |
+| `db` | `multiclass_db` | `mysql:8.0` | `${MYSQL_PORT:-3306}:3306` (host port configurable) | Relational database for `predictions` and `feedback`, backed by persistent volume `db_data` |
+
+The `api` and `app` services share the same image: `api` overrides the command
+with `uvicorn`, `app` uses the image default (`streamlit run app/main.py`).
+Startup is ordered by healthchecks: `api` waits for `db`
+(`mysqladmin ping` TCP healthcheck) and exposes its own `GET /health` check, and
+`app` waits for `api` to be healthy (`condition: service_healthy`). `GET /health`
+returns 200 even without a model or database, so a missing artifact does not
+block startup. The frontend reaches the backend at `http://api:8000`
+(`API_URL`); both reach the database at `db:3306`.
 
 ## Deployment
 
-- Cloud target: Render / Vercel / AWS (to be decided in M6).
+### Configuration and environment variables
+
+Runtime settings are read from the environment. [.env.example](../.env.example)
+lists the database variables; `MODEL_PATH` is optional and only needed to load
+a model from a non-default path:
+
+| Variable | Default | Used by | Description |
+|---|---|---|---|
+| `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local) | [src/database.py](../src/database.py) | Database connection string (#37). |
+| `MYSQL_DATABASE` | `multiclass` | `db` container | MySQL database created on startup. |
+| `MYSQL_USER` | `app` | `db` container | MySQL application user. |
+| `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
+| `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
+| `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
+
+### Readiness and health checks
+
+`GET /health` on the FastAPI service returns HTTP 200 with:
+
+- `status`: `"ok"` when the HTTP process is live.
+- `model_loaded` (`bool`) and `detail` (`str | null`): whether
+  `models/model.joblib` is loaded and matches the 54-feature contract.
+- `db_connected` (`bool`) and `db_detail` (`str | null`): whether the configured
+  database responds.
+
+Cloud deployment to a public URL (Render / Vercel / AWS) is tracked in #39.
 
 ## Usage
 
+This section is the quick start. The pinned environment, the full run steps
+and the clean-clone checklist are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md),
+which is the reference if the two ever differ.
+
+### 1. Prerequisite: raw dataset and exported model
+
+Place `covtype.data` under `data/raw/covtype.data` (see
+[data/README.md](../data/README.md)) and generate the model artifact once (about
+2 minutes):
+
 ```bash
-docker compose build
-docker compose run --rm --no-deps backend python src/export_model.py
-docker compose up
+# With Docker Compose:
+docker compose up -d --build
+docker compose exec app python src/export_model.py
+# The api service loads the model once at startup, so reload it after exporting:
+docker compose restart api
+
+# Or locally in a Python 3.11 virtual environment:
+python src/export_model.py
 ```
 
-Open the app at http://localhost:8501. Click a "Cargar un ejemplo" button and
-"Predecir cobertura forestal": the predicted species appears with its photo,
-botanical facts, confidence and the per-class probabilities.
+This creates `models/model.joblib` and `models/model_metadata.json` (both
+git-ignored). After the restart, `GET http://localhost:8000/health` reports
+`model_loaded: true`.
 
-Local development (no Docker) needs two terminals:
+### 2. Run with Docker Compose
 
 ```bash
-uvicorn app.api:app --port 8000   # terminal 1: backend (loads the model)
-streamlit run app/main.py         # terminal 2: frontend
+docker compose up --build
+```
+
+This starts all three services (`db`, `api`, `app`):
+
+- Streamlit frontend: <http://localhost:8501>
+- FastAPI backend: <http://localhost:8000> (Swagger UI at `/docs`); the requests
+  of [4. Query the API](#4-query-the-api) work from the host.
+- Stop containers (keeping MySQL data in `db_data`): `docker compose down`
+
+### 3. Run locally without Docker
+
+Requires **Python 3.11** (the reference version; with 3.13 the pinned
+dependencies do not install).
+
+```bash
+python3.11 -m venv .venv           # Windows: py -3.11 -m venv .venv
+source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Export the model artifact (if models/model.joblib is not present yet)
+python src/export_model.py
+
+# Start the FastAPI backend (http://localhost:8000, Swagger UI at /docs)
+uvicorn app.api:app --port 8000
+
+# In a second terminal, start the Streamlit frontend (http://localhost:8501)
+streamlit run app/main.py
+```
+
+When `DATABASE_URL` is not set locally, [src/database.py](../src/database.py)
+automatically persists predictions and feedback in
+`data/processed/multiclass.db` (SQLite).
+
+### 4. Query the API
+
+```bash
+curl http://localhost:8000/health
+
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Elevation": 2900, "Aspect": 150, "Slope": 12,
+    "Horizontal_Distance_To_Hydrology": 250,
+    "Vertical_Distance_To_Hydrology": 40,
+    "Horizontal_Distance_To_Roadways": 2300,
+    "Hillshade_9am": 215, "Hillshade_Noon": 225, "Hillshade_3pm": 140,
+    "Horizontal_Distance_To_Fire_Points": 1900,
+    "Wilderness_Area": 1, "Soil_Type": 29
+  }'
 ```

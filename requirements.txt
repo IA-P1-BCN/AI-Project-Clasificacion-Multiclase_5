@@ -3,6 +3,7 @@ numpy==1.26.4
 pandas==2.2.2
 scikit-learn==1.5.1
 joblib==1.4.2
+scipy==1.17.1  # needed by scikit-learn; pinned so a new release cannot change it
 
 # Visualization
 matplotlib==3.9.2
@@ -12,9 +13,14 @@ seaborn==0.13.2
 xgboost==2.1.1
 lightgbm==4.5.0
 
+# Interpretability (#30). 0.49.1 is the last shap release compatible with the
+# pinned numpy 1.26.4; shap 0.50+ requires numpy>=2 (and 0.52+ Python >=3.12).
+shap==0.49.1
+
 # App (frontend + backend + database)
 streamlit==1.38.0
 fastapi==0.112.2
+pydantic==2.14.3  # request validation in app/schemas.py; FastAPI only bounds it below 3
 uvicorn[standard]==0.30.6
 requests==2.32.3
 PyMySQL==1.1.1

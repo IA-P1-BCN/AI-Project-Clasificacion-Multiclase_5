@@ -585,3 +585,62 @@ high-confidence errors remains — e.g. Krummholz → Spruce/Fir and Lodgepole P
 
 These are diagnostic recommendations; acting on them belongs to #29 (tuning),
 #18 (feature engineering) and the app issues, not to this ticket.
+
+## Model interpretability (SHAP)
+
+Issue #30 (optional / *Experto*). Reproduce with:
+`python src/shap_interpretability.py`
+
+SHAP attributes each prediction to its features with a signed contribution,
+complementing the unsigned impurity/permutation importances of #26: it shows not
+only *which* features matter but *in which direction* and *for which class*.
+
+- **Model & data:** same exported pipeline as the *Results* section, fitted on
+  the 406,708 training rows only; SHAP is computed on a reproducible sample of
+  2,000 held-out **validation** rows (`random_state=42`). No leakage.
+- **Approximate SHAP:** the forest grows unpruned (max depth 64, ~80k nodes per
+  tree), so exact TreeSHAP costs ~3 s/row (hours for a useful sample). The module
+  uses the fast approximate (Saabas) attribution, which is near-instant and
+  preserves the ranking and sign the plots below rely on.
+
+### Global feature importance (mean |SHAP|, validation sample)
+
+![SHAP summary bar](figures/shap_summary_bar.png)
+
+| Rank | Feature | Mean \|SHAP\| (all classes) |
+|---|---|---:|
+| 1 | `Elevation` | 0.0618 |
+| 2 | `Horizontal_Distance_To_Roadways` | 0.0242 |
+| 3 | `Horizontal_Distance_To_Fire_Points` | 0.0202 |
+| 4 | `Horizontal_Distance_To_Hydrology` | 0.0122 |
+| 5 | `Vertical_Distance_To_Hydrology` | 0.0108 |
+| 6 | `Wilderness_Area4` | 0.0108 |
+| 7 | `Hillshade_Noon` | 0.0094 |
+
+- **`Elevation` dominates**, with ~2.5× the mean |SHAP| of the next feature —
+  the same verdict as the MDI and permutation rankings of #26, now confirmed by a
+  third, signed method. The distance-to-roadways / fire-points / hydrology
+  features follow, then the wilderness-area indicators and `Hillshade_Noon`.
+- **The attribution is concentrated on the two majority classes.** For
+  `Elevation`, mean |SHAP| is 0.170 for Spruce/Fir and 0.163 for Lodgepole Pine
+  but ≤ 0.033 for the other five classes — the model leans hardest on elevation
+  exactly where the dominant Spruce/Fir ↔ Lodgepole Pine confusion lives (#27).
+  `Wilderness_Area4` and some soil types (`Soil_Type10`, `Soil_Type22`) are
+  relatively more important for the minority classes (Ponderosa Pine,
+  Douglas-fir).
+
+### Effect direction — Lodgepole Pine
+
+![SHAP beeswarm, Lodgepole Pine](figures/shap_beeswarm.png)
+![SHAP dependence, Elevation](figures/shap_dependence_elevation.png)
+
+The beeswarm and the `Elevation` dependence plot for Lodgepole Pine make the
+mechanism explicit: SHAP for `Elevation` is **positive (toward Lodgepole Pine)
+up to ~2,900–3,000 m and turns sharply negative above it**. This is the same
+boundary the error analysis (#27) found — Lodgepole Pine sits at a lower
+elevation band (~2,920 m mean) and the model correctly pushes high-elevation
+rows away from it toward Spruce/Fir. SHAP therefore corroborates that the
+residual errors are a genuine elevation overlap between the two classes, not an
+arbitrary model artefact.
+
+The interpretation is diagnostic; it does not change the model.

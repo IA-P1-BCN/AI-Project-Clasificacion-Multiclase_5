@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))  # the training modules live in the flat s
 
 from target_encoding import CLASS_NAMES  # noqa: E402
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # One correctly-classified cell per cover type, spread across the confidence
 # spectrum so the demo shows the model's full behaviour: clear cells (high
@@ -206,11 +206,11 @@ def _payload_from_state() -> dict:
 def _post_predict(payload: dict) -> dict | None:
     """POST the payload to the backend and return the parsed response, or None on failure."""
     try:
-        response = requests.post(f"{BACKEND_URL}/predict", json=payload, timeout=15)
+        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
     except requests.exceptions.ConnectionError:
         st.error(
             "No se pudo conectar con el backend. Asegúrate de que FastAPI está "
-            f"corriendo (`uvicorn app.api:app --port 8000`) y accesible en {BACKEND_URL}."
+            f"corriendo (`uvicorn app.api:app --port 8000`) y accesible en {API_URL}."
         )
         return None
     if response.status_code == 200:
