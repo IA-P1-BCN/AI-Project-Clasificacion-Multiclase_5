@@ -1014,7 +1014,7 @@ Todavía no hay despliegue automático (CD).
 | fastapi | 0.162.5 | 0.112.2 |
 | numpy | — | 1.26.4 |
 
-Además, `pydantic` no está fijado, pero la CI (que instala las versiones fijadas de `requirements.txt` en Python 3.11) ya pasó en verde importando `app.api` con `fastapi==0.112.2`, así que esa combinación funciona. Lo que sigue pendiente es decidir si se alinea el entorno local con el fijado.
+Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic==2.14.3`, `scipy==1.17.1`, las versiones que resuelve hoy una construcción limpia de Docker, las mismas que instala la CI), y la prueba de clon limpio pasa con ellas. Lo que sigue pendiente es decidir si se alinea el entorno local con el fijado.
 
 **Justificación:** un modelo guardado con `joblib` en una versión puede fallar al abrirse en otra. Conviene entrenar y servir en el mismo entorno (el Docker).
 
@@ -1023,6 +1023,25 @@ Además, `pydantic` no está fijado, pero la CI (que instala las versiones fijad
 **Evidencia:** `requirements.txt` · `pip list` de cada equipo.
 
 **Responsable:** equipo (decidir si se fijan las versiones al entorno real o se mantienen).
+
+---
+
+#### D10.6 · Reproducibilidad: versiones fijadas y pasos de ejecución  (✅)
+
+**Decisión:** dejar `requirements.txt` con todas las librerías que usa el código fijadas con `==` (se agregaron `pydantic` y `scipy`), documentar cómo ejecutar el proyecto con Docker y sin Docker en `docs/REPRODUCIBILITY.md`, y comprobarlo desde un clon limpio.
+
+**Justificación:**
+- **Solo lo que faltaba:** las librerías directas ya estaban fijadas; los huecos eran `pydantic` (lo importa el código y FastAPI solo lo acota por debajo de 3) y `scipy` (lo necesita scikit-learn y no tiene tope). Un fichero de bloqueo completo sería un segundo archivo que mantener; se puede añadir si aparece deriva.
+- **Python 3.11 es la referencia** (Docker, CI y `.python-version`). La 3.12 funciona (la exportación de #32 corrió en ella); la 3.13 no, porque `numpy` 1.26.4 y `scikit-learn` 1.5.1 no tienen ruedas para ella.
+- **El primer intento de clon limpio falló:** el puerto 3306 de un equipo estaba ocupado por un MySQL local. Se hizo configurable (`MYSQL_PORT`, por defecto 3306) en `docker-compose.yml` y `.env.example`.
+- **Resultado de la prueba:** la imagen se construye con los pines nuevos; los 24 módulos importan; la exportación da accuracy 0,9520 y macro F1 0,9186; `/health` informa modelo y base de datos conectados; `/predict` devuelve `cover_type` 2 con confianza 0,95.
+- **Límites conocidos:** el dataset se descarga a mano; el modelo se entrena en cada clon (no está en Git); la app de Streamlit sigue siendo el placeholder de M0 y no se abrió en el navegador durante la prueba.
+
+**Explicación sencilla:** una receta que dice la versión exacta de cada ingrediente y los pasos para cocinarla. Para saber si funciona, la cocinamos en una cocina vacía.
+
+**Evidencia:** issue #46 · `requirements.txt` · `docs/REPRODUCIBILITY.md` · `specs/feature-46-reproducibility-requirements-run-steps.md`.
+
+**Responsable:** @Leandroletoile y equipo.
 
 ---
 
