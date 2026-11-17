@@ -1,0 +1,95 @@
+# Spec: feature/45-docs-deliverables-app
+
+| | |
+|---|---|
+| Issue | #45 - [M7] Docs (DELIVERABLES.md, APP.md) |
+| Milestone | M7 |
+| Branch | `feature/45-docs-deliverables-app` (from `develop`) |
+| Owner | @levifvy |
+| Depends on | #32 (model export, merged), #34 (FastAPI backend, merged), #36 (retraining pipeline, merged), #37 (database integration, merged), #25 (final metrics, merged) |
+
+## Goal
+
+Complete `docs/DELIVERABLES.md` with the verified status and evidence of every
+required deliverable, technical requirement and delivery level, and complete
+`docs/APP.md` with the application requirements, architecture, Dockerization,
+deployment and usage instructions, verifying that all links resolve.
+
+## Scope
+
+- In scope:
+  - `docs/DELIVERABLES.md`: update the `Required deliverables` and `Technical
+    requirements` checklists with concrete repository evidence, and replace the
+    `_To be filled in M7/M8._` placeholder in `Final checklist` with a
+    delivery-level verification table (`Esencial`, `Medio`, `Avanzado`,
+    `Experto`) and the project board links.
+  - `docs/APP.md`: align `Functional requirements` and `Architecture` with the
+    implemented modules (`app/main.py`, `app/api.py`, `app/serving.py`,
+    `app/schemas.py`, `src/export_model.py`, `src/database.py`,
+    `src/retraining.py`), and replace the stub `Dockerization`, `Deployment`
+    and `Usage` sections (`_To be filled in M6._`) with full, reproducible
+    instructions for local and Docker execution.
+- Out of scope:
+  - Completing `README.md` (#43, @nagicome03).
+  - Standalone technical report narrative (#44, @carovasq).
+  - Final `requirements.txt` pinning and reproducibility guide (#46).
+  - Detailed Docker/compose troubleshooting guide (#47, @Leandroletoile,
+    @carovasq).
+  - Implementing the interactive Streamlit prediction UI (#33, @nagicome03),
+    the production feedback endpoint/dashboard (#35, @carovasq), multi-service
+    container orchestration (#38, @carovasq), or live cloud deployment (#39).
+
+## Design
+
+| File | Change |
+|---|---|
+| `docs/DELIVERABLES.md` | Tick verified deliverables and technical requirements, link every item to its module or documentation file, and fill the *Final checklist* by delivery level (`Esencial`, `Medio`, `Avanzado`, `Experto`). |
+| `docs/APP.md` | Expand *Functional requirements* and *Architecture*, and complete *Dockerization*, *Deployment* and *Usage* with concrete commands and environment variables. |
+
+Decisions and reasons:
+
+- **Honest status reporting in `docs/DELIVERABLES.md`.** Items already merged
+  into `develop` are ticked (`[x]`) with links to the exact files and commands
+  that verify them (`src/final_metrics.py` for the `+4.80` pp `< 5%`
+  `overfitting_gap`, `app/api.py` and `src/export_model.py` for inference,
+  `Dockerfile` and `docker-compose.yml` for Dockerization, `docs/` for
+  documentation). Items whose tickets are still open (#33 Streamlit UI, #40
+  unit tests, #48 business presentation, #49 technical code presentation) are
+  explicitly marked with their owning issue numbers rather than ticked
+  prematurely.
+- **Complete `docs/APP.md` without stepping into #33, #35, #38, #39 or #47.**
+  `docs/APP.md` already documents the FastAPI backend (#34), model export (#32),
+  MySQL/SQLite persistence (#37) and retraining pipeline (#36). This branch
+  completes the remaining sections (*Functional requirements*, *Architecture*,
+  *Dockerization*, *Deployment*, *Usage*) so a reader can export the model, run
+  the backend and frontend locally or via Docker Compose, and query `/health`
+  and `/predict`, while clearly noting the boundaries with #33, #35, #38, #39
+  and #47.
+- **Link verification.** Every relative link in `docs/DELIVERABLES.md` and
+  `docs/APP.md` is checked programmatically from the `docs/` directory so no
+  broken path is introduced.
+
+## Acceptance criteria
+
+- [x] Update DELIVERABLES.md checklist
+- [x] Document app requirements and usage in APP.md
+- [x] Verify links
+- [x] DELIVERABLES.md and APP.md complete
+- [x] No `_To be filled in M6._` or `_To be filled in M7/M8._` placeholders remain in `docs/DELIVERABLES.md` or `docs/APP.md` (added)
+
+## Verification
+
+```bash
+python -c "import pathlib, re; root = pathlib.Path('.'); [print(f, '->', t, 'EXISTS' if (f.parent / t.split('#')[0]).resolve().exists() else 'MISSING') for f in [pathlib.Path('docs/DELIVERABLES.md'), pathlib.Path('docs/APP.md')] for t in re.findall(r'\]\((?!https?://|#)([^)]+)\)', f.read_text(encoding='utf-8'))]"
+```
+
+Expected: every relative link in `docs/DELIVERABLES.md` and `docs/APP.md`
+prints `EXISTS`, and neither file contains `_To be filled`.
+
+Observed (2026-11-17):
+
+- All 92 relative links across `docs/DELIVERABLES.md` (67 links) and
+  `docs/APP.md` (25 links) resolved and printed `EXISTS` (0 `MISSING`).
+- Neither `docs/DELIVERABLES.md` nor `docs/APP.md` contains `_To be filled`.
+- `git status --short` shows only `specs/feature-45-docs-deliverables-app.md`,
+  `docs/DELIVERABLES.md` and `docs/APP.md`.
