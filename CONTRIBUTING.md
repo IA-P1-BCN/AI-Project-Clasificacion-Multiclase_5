@@ -128,11 +128,13 @@ runs [.github/workflows/ci.yml](.github/workflows/ci.yml) (#41):
 
 - **Install, imports and tests:** installs [requirements.txt](requirements.txt)
   on the Python version of [.python-version](.python-version), imports every
-  module of `src/` and `app/`, and runs `pytest` once a `tests/` folder exists.
+  module of `src/` and `app/`, and runs the `pytest` unit-test suite (#40).
 - **Docker build:** builds the image without pushing it.
 
-The result appears as checks at the bottom of the pull request. Run the import
-check locally with `python scripts/check_imports.py`.
+The result appears as checks at the bottom of the pull request. Run the same
+checks locally with `python scripts/check_imports.py` and `python -m pytest`.
+Tests that need the git-ignored dataset or model artifact skip when those files
+are absent, so the suite passes on a fresh clone.
 
 ## Governance audit checks
 
