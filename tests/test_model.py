@@ -94,7 +94,8 @@ def test_load_model_roundtrip_and_predict(fitted_pipeline, tmp_path):
 
     loaded = load_model(path)
     assert loaded.ready
-    assert sorted(loaded.cover_types) == sorted(c for c in COVER_TYPES if c in loaded.cover_types)
+    # The reloaded model decodes to the same Cover_Types the pipeline was trained on.
+    assert sorted(loaded.cover_types) == sorted(int(c) for c in fitted_pipeline.classes_)
 
     result = predict(loaded, SAMPLE_REQUEST)
     assert result["cover_type"] in COVER_TYPES
