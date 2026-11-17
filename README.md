@@ -69,6 +69,7 @@ Multiclass classification is a supervised learning task in which each input inst
 │   ├── PREPROCESSING.md
 │   ├── MODELING.md
 │   ├── APP.md
+│   ├── REPRODUCIBILITY.md
 │   └── DELIVERABLES.md
 ├── data/
 │   ├── README.md          # Dataset source, version, size and checksum
@@ -76,6 +77,7 @@ Multiclass classification is a supervised learning task in which each input inst
 │   └── processed/         # Cleaned/feature-engineered data (git-ignored)
 ├── models/                # Trained model artifacts (git-ignored)
 ├── src/                   # Library code (preprocessing, training, ...)
+├── scripts/               # check_imports.py (run by CI)
 └── app/
     └── main.py            # Streamlit app
 ```
@@ -96,6 +98,8 @@ Then open the app at **http://localhost:8501**. To stop: `Ctrl+C` (or
 `docker compose down`). After changing `requirements.txt` or the `Dockerfile`,
 rebuild with `docker compose up --build`.
 
+Step-by-step run instructions (Docker and local), the pinned environment and a clean-clone checklist: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+
 ### Dataset
 
 The dataset is **not** stored in the repository (`data/raw/` is git-ignored). After cloning, download it and place it locally:
@@ -112,15 +116,13 @@ Every column (type, unit, range and meaning) is documented in [docs/DATA_DICTION
 ### Local development without Docker (optional)
 
 ```bash
-python -m venv .venv
+python3.11 -m venv .venv          # Windows: py -3.11 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-> An optional PostgreSQL service is already defined (commented) in
-> `docker-compose.yml` for later milestones. Copy `.env.example` to `.env`
-> and uncomment the `db` block to enable it.
+> Use Python 3.11 (3.13 is not supported by the pinned libraries). Without `DATABASE_URL` the API stores predictions in a local SQLite file; see [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md) for the MySQL option.
 
 ## Contributing
 

@@ -113,3 +113,21 @@ merged):
   `cover_type` 2 (Lodgepole Pine, `confidence` 0.95) from the host. Clarified
   that `.env.example` lists only the database variables (`MODEL_PATH` is
   optional).
+
+Second review round (2026-11-17, PR #97, after merging `develop` with #27 via
+#96 and #46 via #98):
+
+- `docs/APP.md` conflict in *Usage*: kept the full quick-start section of this
+  branch and added a pointer to [REPRODUCIBILITY.md](../docs/REPRODUCIBILITY.md)
+  (#46) as the reference for the pinned environment, run steps and clean-clone
+  checklist, so there is a single source of truth.
+- `docs/APP.md`: MySQL port shown as `${MYSQL_PORT:-3306}:3306` (#98) and
+  `MYSQL_PORT` added to both environment-variable tables; local run now states
+  Python 3.11 (`python3.11 -m venv .venv`), since the pinned versions do not
+  install on 3.13.
+- `docs/DELIVERABLES.md`: error analysis marked done (#27:
+  `src/error_analysis.py`, `docs/figures/error_analysis.png`) and removed from
+  the remaining items; tuned CV scores of #29 flagged as slightly optimistic
+  (parameters selected on the same `train` folds; unbiased measure in #28 and
+  #25); *Technical report* (#44 open) and *Documentation* (#43 open) moved back
+  to in progress instead of `[x]`.

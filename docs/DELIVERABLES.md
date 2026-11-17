@@ -29,14 +29,15 @@
     [.github/workflows/ci.yml](../.github/workflows/ci.yml)). Workflow and rules
     are documented in [CONTRIBUTING.md](../CONTRIBUTING.md) and
     [AGENTS.md](../AGENTS.md) (final M8 audit tracked in #50).
-- [x] **Technical report with metrics and model analysis.**
-  - Documented across [EDA.md](EDA.md) (#7–#11),
+- [ ] **Technical report with metrics and model analysis.** *(in progress)*
+  - The analysis is complete and documented across [EDA.md](EDA.md) (#7–#11),
     [PREPROCESSING.md](PREPROCESSING.md) (#12–#18) and
-    [MODELING.md](MODELING.md) (#19–#26, #29: 5-fold `StratifiedKFold`
+    [MODELING.md](MODELING.md) (#19–#27, #29: 5-fold `StratifiedKFold`
     comparison, shortlist, per-class precision/recall/F1, 7×7 confusion
-    matrices on `validation` and `test`, permutation feature importance and
-    hyperparameter tuning). Remaining M5/M7 narrative items are tracked in
-    #27, #31 and #44.
+    matrices on `validation` and `test`, permutation feature importance,
+    error analysis and hyperparameter tuning).
+  - The consolidated technical report is still open (#44), as is the final
+    write-up of the modeling results (#31).
 - [ ] **Business presentation (PowerPoint, Canva, etc.).**
   - Tracked in M8 (#48).
 - [ ] **Technical code presentation.**
@@ -75,7 +76,9 @@
     [docker-compose.yml](../docker-compose.yml) (`app` + `db` `mysql:8.0` with
     healthcheck and persistent `db_data` volume), verified in CI (#1, #37, #41).
     Full frontend + backend container orchestration is tracked in #38.
-- [x] **Documentation (`README`, `SPEC`, `docs/`).**
+- [ ] **Documentation (`README`, `SPEC`, `docs/`).** *(in progress)*
+  - The final `README.md` is still open (#43); the `docs/` set below is in
+    place and kept in sync with each merged issue.
   - Entry point and setup: [README.md](../README.md),
     [CONTRIBUTING.md](../CONTRIBUTING.md), [SPEC.md](../SPEC.md) (#2, #6).
   - Dataset and provenance: [data/README.md](../data/README.md) (#4),
@@ -83,8 +86,8 @@
     [DATA_DICTIONARY.md](DATA_DICTIONARY.md) (#5).
   - Analysis, preprocessing, modeling and application: [EDA.md](EDA.md)
     (#7–#11), [PREPROCESSING.md](PREPROCESSING.md) (#12–#18),
-    [MODELING.md](MODELING.md) (#19–#26, #29), [APP.md](APP.md) (#32, #34, #36, #37,
-    #45), [GUIA_PROYECTO_CLASIFICACION.md](GUIA_PROYECTO_CLASIFICACION.md), and
+    [MODELING.md](MODELING.md) (#19–#27, #29), [APP.md](APP.md) (#32, #34, #36, #37,
+    #45), [REPRODUCIBILITY.md](REPRODUCIBILITY.md) (#46), [GUIA_PROYECTO_CLASIFICACION.md](GUIA_PROYECTO_CLASIFICACION.md), and
     branch specs in [specs/](../specs/README.md).
 
 ## Final checklist
@@ -102,7 +105,7 @@ Status across the four delivery levels defined in [README.md](../README.md) and
 | Overfitting controlled (`< 5%` train vs validation gap) | ✅ Verified (`+4.80` pp) | [MODELING.md](MODELING.md), [src/final_metrics.py](../src/final_metrics.py) (#25; formal check in #28) — `python src/final_metrics.py` |
 | Basic application serving multiclass predictions | 🟡 In progress | FastAPI backend (#34: [app/api.py](../app/api.py)) & exported pipeline (#32) merged; Streamlit UI tracked in #33 ([app/main.py](../app/main.py)) and end-to-end check in #42 |
 | Metrics report: accuracy, per-class precision/recall/F1, confusion matrix | ✅ Done | [MODELING.md](MODELING.md) (*Results*), [src/final_metrics.py](../src/final_metrics.py) (#25) |
-| Feature importance & error analysis | 🟡 Importance done, error analysis pending | MDI and validation-set permutation importance in [MODELING.md](MODELING.md) (#21, #26: [src/feature_importance.py](../src/feature_importance.py) — `python src/feature_importance.py`) and gain importance in [PREPROCESSING.md](PREPROCESSING.md) (#18); error analysis tracked in #27 |
+| Feature importance & error analysis | ✅ Done | MDI and validation-set permutation importance in [MODELING.md](MODELING.md) (#21, #26: [src/feature_importance.py](../src/feature_importance.py) — `python src/feature_importance.py`) and gain importance in [PREPROCESSING.md](PREPROCESSING.md) (#18); error analysis (confused pairs, Elevation overlap, confidence of errors) in [MODELING.md](MODELING.md#error-analysis) (#27: [src/error_analysis.py](../src/error_analysis.py), figure [docs/figures/error_analysis.png](figures/error_analysis.png) — `python src/error_analysis.py`) |
 | Business & technical presentations | ⬜ Pending (M8) | Tracked in #48, #49 and #51 |
 
 ### 🟡 Medium level (`nivel-medio`)
@@ -111,7 +114,7 @@ Status across the four delivery levels defined in [README.md](../README.md) and
 |---|---|---|
 | Ensemble models (`RandomForest`, `XGBoost`, `LightGBM`) | ✅ Done | [src/random_forest.py](../src/random_forest.py) (#21), [src/gradient_boosting.py](../src/gradient_boosting.py) (#22), [src/model_comparison.py](../src/model_comparison.py) (#23) |
 | Stratified split & 5-fold `StratifiedKFold` cross-validation | ✅ Done | [src/data_split.py](../src/data_split.py) (#16), [src/baseline.py](../src/baseline.py) (#19), [src/imbalance_handling.py](../src/imbalance_handling.py) (#17) |
-| Hyperparameter optimization (`GridSearchCV` / `RandomizedSearch` / `Optuna`) | ✅ Done | `RandomizedSearchCV` on train only, 5-fold macro F1: Random Forest `0.9123 → 0.9326`, XGBoost `0.8489 → 0.9240` ([MODELING.md](MODELING.md), [src/hyperparameter_optimization.py](../src/hyperparameter_optimization.py), #29) — `python src/hyperparameter_optimization.py`. The exported pipeline (#32) still uses the default Random Forest; re-exporting with the tuned parameters is pending |
+| Hyperparameter optimization (`GridSearchCV` / `RandomizedSearch` / `Optuna`) | ✅ Done | `RandomizedSearchCV` on train only, 5-fold macro F1: Random Forest `0.9123 → 0.9326`, XGBoost `0.8489 → 0.9240`. These tuned scores are CV on `train` with the parameters selected on those same folds, so they are slightly optimistic; the unbiased measure comes from #28 (validation) and #25 (test) ([MODELING.md](MODELING.md), [src/hyperparameter_optimization.py](../src/hyperparameter_optimization.py), #29) — `python src/hyperparameter_optimization.py`. The exported pipeline (#32) still uses the default Random Forest; re-exporting with the tuned parameters is pending |
 | Feedback collection system (production metrics) | 🟡 In progress | Database table `feedback` and `save_feedback` / `list_feedback` merged (#37: [src/database.py](../src/database.py)); endpoint/UI tracked in #35 |
 | New data collection & retraining pipeline | ✅ Done | [APP.md](APP.md), [src/retraining.py](../src/retraining.py) (#36) — `python src/retraining.py` |
 

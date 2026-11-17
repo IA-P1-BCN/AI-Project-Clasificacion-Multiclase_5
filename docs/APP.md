@@ -234,6 +234,7 @@ Environment variables (see `.env.example`):
 | `MYSQL_USER` | `app` | Application database user |
 | `MYSQL_PASSWORD` | `app` | Application database password |
 | `MYSQL_ROOT_PASSWORD` | `root` | MySQL root password (used by healthcheck) |
+| `MYSQL_PORT` | `3306` | Host port published for MySQL; set it (e.g. `3307`) if 3306 is taken |
 | `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` | Connection URL read by `src/database.py` |
 
 ### Schema
@@ -374,7 +375,7 @@ backend process orchestration and detailed Docker guide tracked in #38 and
 | Service | Container | Image / Build | Port | Purpose |
 |---|---|---|---|---|
 | `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Application runtime with mounted `./app`, `./src`, `./data` and `./models` volumes |
-| `db` | `multiclass_db` | `mysql:8.0` | `3306:3306` | Relational database for `predictions` and `feedback`, backed by persistent volume `db_data` |
+| `db` | `multiclass_db` | `mysql:8.0` | `${MYSQL_PORT:-3306}:3306` (host port configurable) | Relational database for `predictions` and `feedback`, backed by persistent volume `db_data` |
 
 The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
 (`condition: service_healthy`) before starting.
@@ -395,6 +396,7 @@ a model from a non-default path:
 | `MYSQL_USER` | `app` | `db` container | MySQL application user. |
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
 | `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
+| `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
 
 ### Readiness and health checks
 
@@ -409,6 +411,10 @@ a model from a non-default path:
 Cloud deployment to a public URL (Render / Vercel / AWS) is tracked in #39.
 
 ## Usage
+
+This section is the quick start. The pinned environment, the full run steps
+and the clean-clone checklist are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md),
+which is the reference if the two ever differ.
 
 ### 1. Prerequisite: raw dataset and exported model
 
@@ -450,8 +456,11 @@ A permanent `api` service in Compose is tracked in #38.
 
 ### 3. Run locally without Docker
 
+Requires **Python 3.11** (the reference version; with 3.13 the pinned
+dependencies do not install).
+
 ```bash
-python -m venv .venv
+python3.11 -m venv .venv           # Windows: py -3.11 -m venv .venv
 source .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
