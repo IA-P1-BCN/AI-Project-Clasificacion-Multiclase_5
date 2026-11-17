@@ -27,3 +27,6 @@ cryptography==43.0.1  # PyMySQL needs it for the MySQL 8 caching_sha2_password l
 
 # Config
 python-dotenv==1.0.1
+
+# Tests (#40). Test-only; kept here because CI installs this single file.
+pytest==8.3.3
