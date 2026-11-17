@@ -74,9 +74,10 @@
 - [x] **Dockerized project.**
   - Multi-service setup with [Dockerfile](../Dockerfile) (`python:3.11-slim`,
     `libgomp1`, pinned dependencies) and
-    [docker-compose.yml](../docker-compose.yml) (`app` + `db` `mysql:8.0` with
+    [docker-compose.yml](../docker-compose.yml) (`api` + `app` + `db` `mysql:8.0` with
     healthcheck and persistent `db_data` volume), verified in CI (#1, #37, #41).
-    Full frontend + backend container orchestration is tracked in #38.
+    Frontend and backend run as separate services since #38; usage guide:
+    [DOCKER.md](DOCKER.md) (#47).
 - [ ] **Documentation (`README`, `SPEC`, `docs/`).** *(in progress)*
   - The final `README.md` is still open (#43); the `docs/` set below is in
     place and kept in sync with each merged issue.
@@ -123,7 +124,7 @@ Status across the four delivery levels defined in [README.md](../README.md) and
 
 | Requirement | Status | Evidence & reproduction |
 |---|---|---|
-| Dockerization (`Dockerfile` + `docker-compose.yml`) | ✅ Base + DB merged | [Dockerfile](../Dockerfile) (#1), [docker-compose.yml](../docker-compose.yml) (#1, #37), CI build (#41); multi-process app orchestration tracked in #38 and #47 |
+| Dockerization (`Dockerfile` + `docker-compose.yml`) | ✅ Done | [Dockerfile](../Dockerfile) (#1), [docker-compose.yml](../docker-compose.yml) (#1, #37, #38), CI build (#41), [DOCKER.md](DOCKER.md) (#47) |
 | Database integration (MySQL 8.0 + SQLite fallback) | ✅ Done | [APP.md](APP.md), [src/database.py](../src/database.py) (#37) — `docker compose exec app python src/database.py` |
 | Cloud deployment | ⬜ Pending | Tracked in #39 |
 | Unit tests (data integrity, model works, minimum metrics) | ⬜ Pending | CI test runner wired in [.github/workflows/ci.yml](../.github/workflows/ci.yml) (#41); test suite tracked in #40 |
