@@ -12,6 +12,9 @@ seaborn==0.13.2
 xgboost==2.1.1
 lightgbm==4.5.0
 
+# Interpretability (#30)
+shap==0.54.1
+
 # App (frontend + backend + database)
 streamlit==1.38.0
 fastapi==0.112.2
