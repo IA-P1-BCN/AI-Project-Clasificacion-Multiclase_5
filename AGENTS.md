@@ -30,8 +30,10 @@ use those terms and names exactly.
 ## Branches and commits
 
 - Branch name: `feature/<issue-number>-<short-kebab-description>`
-  (e.g. `feature/14-feature-scaling`). Use `fix/<...>` for bug fixes. Work
-  without an issue omits the number (e.g. `feature/agentic-dev-setup`).
+  (e.g. `feature/14-feature-scaling`). Use `fix/<...>` for bug fixes and
+  `docs/<short-kebab-description>` for documentation-only work without an
+  issue. Other work without an issue omits the number (e.g.
+  `feature/agentic-dev-setup`).
 - Commits follow Conventional Commits: `<type>(<scope>): <imperative subject>`,
   subject under ~72 characters. Reference the issue in the PR title, e.g.
   `feat(preprocessing): scale numeric features (#14)`.

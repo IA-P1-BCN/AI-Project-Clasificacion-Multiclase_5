@@ -68,6 +68,7 @@ Multiclass classification is a supervised learning task in which each input inst
 │   ├── EDA.md
 │   ├── PREPROCESSING.md
 │   ├── MODELING.md
+│   ├── TECHNICAL_REPORT.md  # consolidated metrics & analysis report
 │   ├── APP.md
 │   ├── REPRODUCIBILITY.md
 │   ├── DOCKER.md
@@ -131,3 +132,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch model (`main` / `develop`
 / `feature/*`) and the Conventional Commits convention.
 
 See [docs/APP.md](docs/APP.md) for the application requirements and [SPEC.md](SPEC.md) for the technical specification.
+
+The consolidated metrics and model analysis (methodology, model comparison, final metrics, confusion matrix, feature importance and error analysis) are in [docs/TECHNICAL_REPORT.md](docs/TECHNICAL_REPORT.md).

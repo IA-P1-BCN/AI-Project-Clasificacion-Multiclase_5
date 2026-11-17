@@ -445,16 +445,22 @@ stored_df = load_new_samples()
 
 The containerized environment is defined in [Dockerfile](../Dockerfile) and
 [docker-compose.yml](../docker-compose.yml) (#1, #37; multi-service frontend +
-backend process orchestration and detailed Docker guide tracked in #38 and
-#47):
+backend orchestration added in #38; detailed usage guide in [DOCKER.md](DOCKER.md), #47):
 
 | Service | Container | Image / Build | Port | Purpose |
 |---|---|---|---|---|
-| `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Application runtime with mounted `./app`, `./src`, `./data` and `./models` volumes |
+| `api` | `multiclass_api` | Built from [Dockerfile](../Dockerfile), command overridden to `uvicorn app.api:app` | `8000:8000` | FastAPI backend; serves the model from the read-only `./models` mount and persists to `db` |
+| `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Streamlit frontend with mounted `./app`, `./src`, `./data` and `./models` volumes |
 | `db` | `multiclass_db` | `mysql:8.0` | `${MYSQL_PORT:-3306}:3306` (host port configurable) | Relational database for `predictions` and `feedback`, backed by persistent volume `db_data` |
 
-The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
-(`condition: service_healthy`) before starting.
+The `api` and `app` services share the same image: `api` overrides the command
+with `uvicorn`, `app` uses the image default (`streamlit run app/main.py`).
+Startup is ordered by healthchecks: `api` waits for `db`
+(`mysqladmin ping` TCP healthcheck) and exposes its own `GET /health` check, and
+`app` waits for `api` to be healthy (`condition: service_healthy`). `GET /health`
+returns 200 even without a model or database, so a missing artifact does not
+block startup. The frontend reaches the backend at `http://api:8000`
+(`API_URL`); both reach the database at `db:3306`.
 
 ## Deployment
 
@@ -524,9 +530,10 @@ files natively and serves them at
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
-lists the local Compose variables; the Space
-[Dockerfile](../deploy/huggingface/Dockerfile) sets the cloud defaults and
-the Space settings add the model variables:
+lists the database variables plus `MODEL_PATH` and `API_URL` (the Compose
+defaults; change `MODEL_PATH` only to load a model from a non-default path).
+The Space [Dockerfile](../deploy/huggingface/Dockerfile) sets the cloud
+defaults and the Space settings add the model variables:
 
 | Variable | Default | Used by | Description |
 |---|---|---|---|
@@ -546,6 +553,7 @@ the Space settings add the model variables:
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
 | `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
 | `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
+| `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
 
 ### Readiness and health checks
 
@@ -598,13 +606,16 @@ Place `covtype.data` under `data/raw/covtype.data` (see
 # With Docker Compose:
 docker compose up -d --build
 docker compose exec app python src/export_model.py
+# The api service loads the model once at startup, so reload it after exporting:
+docker compose restart api
 
 # Or locally in a Python 3.11 virtual environment:
 python src/export_model.py
 ```
 
 This creates `models/model.joblib` and `models/model_metadata.json` (both
-git-ignored).
+git-ignored). After the restart, `GET http://localhost:8000/health` reports
+`model_loaded: true`.
 
 ### 2. Run with Docker Compose
 
@@ -612,19 +623,12 @@ git-ignored).
 docker compose up --build
 ```
 
-- Streamlit UI: <http://localhost:8501>
+This starts all three services (`db`, `api`, `app`):
+
+- Streamlit frontend: <http://localhost:8501>
+- FastAPI backend: <http://localhost:8000> (Swagger UI at `/docs`); the requests
+  of [4. Query the API](#4-query-the-api) work from the host.
 - Stop containers (keeping MySQL data in `db_data`): `docker compose down`
-- Run the FastAPI backend: `docker-compose.yml` only publishes port `8501`, so
-  start the API in a one-off container that publishes port `8000` to the host
-  (it reuses the `db` service and the mounted `models/`):
-
-```bash
-docker compose run --rm -p 8000:8000 app uvicorn app.api:app --host 0.0.0.0 --port 8000
-```
-
-The API is then reachable at <http://localhost:8000> (Swagger UI at `/docs`)
-and the requests of [4. Query the API](#4-query-the-api) work from the host.
-A permanent `api` service in Compose is tracked in #38.
 
 ### 3. Run locally without Docker
 

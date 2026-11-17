@@ -54,7 +54,7 @@
 | 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
 | 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
 | 9 | Análisis de errores e interpretación | ✅ Errores (#27) e interpretación con SHAP aproximado (#30) documentados |
-| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41) y guías de ejecución (#46, #47); falta el monitoreo de drift |
+| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38) y guías de ejecución (#46, #47); falta el monitoreo de drift |
 
 ---
 
@@ -1075,7 +1075,7 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 
 #### D10.8 · Guía de uso de Docker  (✅)
 
-**Decisión:** reunir en `docs/DOCKER.md` lo necesario para ejecutar el proyecto con Docker Compose: arranque rápido, qué hace cada servicio (`app`, `db`) y cada volumen, variables de entorno, la imagen, comandos habituales, una tabla de problemas y soluciones, y los límites conocidos. Se enlaza desde `README.md` y `docs/REPRODUCIBILITY.md`.
+**Decisión:** reunir en `docs/DOCKER.md` lo necesario para ejecutar el proyecto con Docker Compose: arranque rápido, qué hace cada servicio (`api`, `app`, `db`) y cada volumen, variables de entorno, la imagen, comandos habituales, una tabla de problemas y soluciones, y los límites conocidos. Se enlaza desde `README.md` y `docs/REPRODUCIBILITY.md`.
 
 **Justificación:** los fallos que encontramos al probar desde cero eran de entorno y no de código: Docker Desktop apagado, el puerto 3306 ocupado por un MySQL local (se resuelve con `MYSQL_PORT=3307`, #46), un nombre de contenedor ya usado por otra copia del proyecto, o `exec` sobre un servicio que no arrancó. Dejarlos escritos con su mensaje de error evita repetir el diagnóstico.
 
@@ -1084,6 +1084,20 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 **Evidencia:** issue #47 · PR #100 · `docs/DOCKER.md` · `specs/feature-47-docker-compose-usage-docs.md`. Probado en Windows con Docker Desktop (Compose v5.5.1): `docker compose up -d --build` levantó `app` y `db` (healthy en 16 s) con los puertos 8501 y 3307, `src/database.py` pasó dentro del contenedor y una segunda copia de la pila falló con el conflicto de nombre que recoge la tabla. Las filas que describen el comportamiento estándar de Docker no se ejecutaron (la spec las lista).
 
 **Responsable:** @Leandroletoile y equipo.
+
+---
+
+#### D10.9 · Orquestación con Docker Compose: API y frontend como servicios  (✅)
+
+**Decisión:** añadir a `docker-compose.yml` el servicio `api` (`uvicorn app.api:app` en el puerto 8000) junto a `app` (Streamlit, 8501) y `db`. Los dos primeros comparten la misma imagen y solo cambia el comando. El arranque se ordena con healthchecks: `api` espera a `db` y `app` espera a que `api` esté healthy. `./models` se monta en solo lectura en `api` y escribible en `app`, que es donde se ejecutan la exportación y el reentrenamiento.
+
+**Justificación:** así `docker compose up` levanta toda la aplicación sin pasos manuales, y una sola imagen evita mantener dos Dockerfile. Limitación: la API carga el modelo solo al arrancar, por eso tras exportar un modelo nuevo hay que ejecutar `docker compose restart api` y esperar a que esté healthy (20 a 40 segundos). Las páginas de Docker se actualizaron para reflejarlo.
+
+**Explicación sencilla:** antes había que encender la API a mano en una segunda terminal; ahora arranca sola, y la pantalla espera a que la API esté lista.
+
+**Evidencia:** issue #38 · PR #104 y PR #105 (correcciones de revisión) · `docker-compose.yml`, `Dockerfile`, `.env.example`, `docs/APP.md` · `specs/feature-38-m6-dockerize-application.md` · `specs/docs-compose-api-service.md`. Probado en Windows con Docker Desktop: con el modelo ya exportado, `docker compose up -d` levantó los tres servicios en 29 s (`db` healthy a los 6,6 s y `api` a los 27,3 s), `GET /health` devolvió `model_loaded: true` y `db_connected: true`, y `POST /predict` con el ejemplo de `docs/APP.md` devolvió la clase 2 (Lodgepole Pine, confianza 0,95). Sin modelo, `/health` da `model_loaded: false` y, tras exportar, sigue igual hasta reiniciar `api`.
+
+**Responsable:** @carovasq.
 
 ---
 

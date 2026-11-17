@@ -1,11 +1,45 @@
 services:
+  # Backend: FastAPI model-serving API (#34, #35, #37). Shares the image with
+  # the frontend and overrides the command with uvicorn.
+  api:
+    build: .
+    container_name: multiclass_api
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source for local edits (restart the service to apply; no hot reload)
+      - ./app:/app/app
+      - ./src:/app/src
+      - ./data:/app/data
+      # Model artifact: read-only, the backend only serves it
+      - ./models:/app/models:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://app:app@db:3306/multiclass}
+      MODEL_PATH: ${MODEL_PATH:-/app/models/model.joblib}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # GET /health returns 200 even without a model or DB (#34 contract)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # Frontend: Streamlit UI (app/main.py). Uses the image default command.
   app:
     build: .
     container_name: multiclass_app
     ports:
       - "8501:8501"
     volumes:
-      # Live-reload source during development
+      # Mount source for local edits (restart the service to apply; no hot reload)
       - ./app:/app/app
       - ./src:/app/src
       - ./data:/app/data
@@ -15,8 +49,10 @@ services:
         required: false
     environment:
       DATABASE_URL: ${DATABASE_URL:-mysql+pymysql://app:app@db:3306/multiclass}
+      # Backend URL for the frontend; Compose resolves "api" to the api service
+      API_URL: ${API_URL:-http://api:8000}
     depends_on:
-      db:
+      api:
         condition: service_healthy
     restart: unless-stopped
 
