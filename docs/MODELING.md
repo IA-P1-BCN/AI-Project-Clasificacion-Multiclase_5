@@ -422,7 +422,8 @@ Issue #25. Reproduce with: `python src/final_metrics.py`
 
 - **Train vs validation accuracy gap (`overfitting_gap`):**
   `1.0000 - 0.9520 = +0.0480` (`+4.80` percentage points, below the 5% quality
-  gate; formal verification and any regularization belong to #28).
+  gate). ✅ **Verified in #28:** the requirement is met, so no regularization,
+  simpler model or extra data is needed.
 - **Validation vs test consistency:** test accuracy (`0.9510`) and test macro F1
   (`0.9199`) are within 0.10 and 0.13 percentage points of validation
   (`0.9520` and `0.9186`), which is consistent with the model generalizing to
