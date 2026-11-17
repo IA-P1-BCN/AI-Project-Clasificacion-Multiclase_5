@@ -53,8 +53,8 @@
 | 6 | Entrenamiento y validación | 🟡 Desbalanceo (#17), regresión logística (#20) y red neuronal (#24) documentados; faltan árboles y shortlist (#21–#23) |
 | 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
 | 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
-| 9 | Análisis de errores e interpretación | ⬜ |
-| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), pipeline exportado (#32) y CI en verde (#41); faltan el endpoint de feedback (#35) y el monitoreo de drift |
+| 9 | Análisis de errores e interpretación | ✅ Errores (#27) e interpretación con SHAP aproximado (#30) documentados |
+| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41) y guías de ejecución (#46, #47); falta el monitoreo de drift |
 
 ---
 
@@ -890,22 +890,36 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Los casos mal clasificados tienen algo en común? | ⬜ |
-| ¿El modelo se apoya en variables que tienen sentido? (importancia de variables, SHAP) | ⬜ |
-| ¿Aprendió algo absurdo? | ⬜ |
-| ¿Qué datos adicionales ayudarían a corregir los errores? | ⬜ |
+| ¿Los casos mal clasificados tienen algo en común? | ✅ Sí. En validación hay 4.180 errores y el 66,9 % es la confusión entre Spruce/Fir y Lodgepole Pine. Cada clase minoritaria pierde casi siempre contra una sola vecina (Aspen → Lodgepole Pine, 87,9 % de sus errores). Los errores tienen menos confianza (media 0,624 frente a 0,889 en los aciertos). Ver D9.1. |
+| ¿El modelo se apoya en variables que tienen sentido? (importancia de variables, SHAP) | ✅ `Elevation` domina en la importancia por impureza, por permutación y en el SHAP aproximado; después vienen las distancias a carreteras, a puntos de fuego y a hidrología. Es coherente con que la altitud separa especies, pero el SHAP es una aproximación (ver D9.2). |
+| ¿Aprendió algo absurdo? | 🟡 No vimos nada absurdo en lo revisado: el efecto de `Elevation` sobre Lodgepole Pine es positivo entre unos 2.500 y 3.000 m y negativo fuera de ese rango, coherente con el solape de altitudes con Spruce/Fir. Falta que lo revise alguien con conocimiento del dominio. |
+| ¿Qué datos adicionales ayudarían a corregir los errores? | 🟡 Las propuestas de #27 son afinar la frontera Spruce/Fir→Lodgepole (ajuste de hiperparámetros, variables nuevas), tratar por pareja a las clases minoritarias y mostrar la confianza en la app. Ninguna está probada todavía; datos nuevos por decidir. |
 
-#### D9.1 · (nombre de la decisión)  (⬜)
+#### D9.1 · Dónde se equivoca el modelo (análisis de errores)  (✅)
 
-**Decisión:**
+**Decisión:** analizar los errores del modelo exportado (#32, Random Forest ajustado solo con `train`) sobre la partición de **validación** (87.152 filas, 4.180 errores), con `python src/error_analysis.py`. Se miran tres cosas: los pares de clases más confundidos, el contraste de `Elevation` en el par dominante y la confianza (`predict_proba` máximo) de aciertos y errores. Los resultados y tres propuestas de mejora están en `docs/MODELING.md` (*Error analysis*).
 
-**Justificación:**
+**Justificación:** la métrica global (macro F1 0,9186) no dice dónde falla. Saber que dos tercios de los errores están en una sola frontera permite dirigir el trabajo (ajuste, variables nuevas) en lugar de mejorar a ciegas.
 
-**Explicación sencilla:**
+**Explicación sencilla:** en vez de mirar la nota media del examen, se miran las preguntas falladas: casi todas son del mismo tema, distinguir dos especies parecidas que viven a altitudes parecidas.
 
-**Evidencia:**
+**Evidencia:** issue #27 · PR #96 · `src/error_analysis.py` · `docs/figures/error_analysis.png` · `docs/MODELING.md` · `specs/feature-27-m5-error-analysis.md`. Spruce/Fir → Lodgepole Pine son 1.852 errores y Lodgepole Pine → Spruce/Fir 943: 2.795 de 4.180 (66,9 %). Los Spruce/Fir mal clasificados tienen una altitud media de 2.941 m, casi la de Lodgepole Pine (2.920 m), frente a 3.139 m en los Spruce/Fir acertados. Los errores se concentran cerca de una confianza de 0,5 a 0,65, pero queda una cola de errores seguros (por ejemplo Krummholz → Spruce/Fir con 0,98). Las propuestas son diagnóstico: aplicarlas no era parte del ticket.
 
-**Responsable:**
+**Responsable:** @carovasq.
+
+---
+
+#### D9.2 · Interpretación con SHAP aproximado  (🟡)
+
+**Decisión:** calcular SHAP sobre 2.000 filas de validación (`random_state=42`) con `shap.TreeExplainer` en modo aproximado (atribución de Saabas), con `python src/shap_interpretability.py`, y guardar tres figuras: barras de importancia, *beeswarm* de Lodgepole Pine y dependencia de `Elevation`. Se fija `shap==0.49.1`, la última versión compatible con `numpy==1.26.4`.
+
+**Justificación:** SHAP añade el **signo** y la **clase** a las importancias de #26. El SHAP exacto tarda unos 3 s por fila en este bosque (profundidad máxima 64), es decir, horas para una muestra útil; la versión aproximada es inmediata. Queda parcial porque la aproximación no es SHAP exacto y no se comparó con él: las tres primeras variables coinciden con la importancia por permutación (#26), pero eso no basta como prueba.
+
+**Explicación sencilla:** la importancia dice qué variables pesan; SHAP dice además hacia qué clase empujan y cuánto, caso por caso. Usamos un cálculo rápido y aproximado: sirve para ver la tendencia, no para fiarse de cada decimal.
+
+**Evidencia:** issue #30 · PR #99 · `src/shap_interpretability.py` · `docs/figures/shap_summary_bar.png`, `shap_beeswarm.png` y `shap_dependence_elevation.png` · `docs/MODELING.md` (*Model interpretability (SHAP)*) · `specs/feature-30-m5-model-interpretability-shap.md`. `Elevation` tiene un SHAP medio de 0,0618, unas 2,5 veces el de `Horizontal_Distance_To_Roadways` (0,0242); le siguen los puntos de fuego (0,0202) y la hidrología. Para Lodgepole Pine el efecto de `Elevation` es positivo entre unos 2.500 y 3.000 m y negativo por encima y por debajo.
+
+**Responsable:** @carovasq.
 
 ---
 
@@ -922,13 +936,13 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 
 | Pregunta | Respuesta |
 |---|---|
-| ¿Cómo sabremos que el modelo empezó a fallar? | 🟡 Cada predicción de `POST /predict` se guarda en la base de datos (tabla `predictions`, #37) y `GET /health` informa si el modelo y la base están disponibles. Ya existe la tabla `feedback` para registrar la clase real, pero falta el endpoint que la use (#35) y no hay detección de *data drift*. |
+| ¿Cómo sabremos que el modelo empezó a fallar? | 🟡 Cada predicción de `POST /predict` se guarda en la base de datos (tabla `predictions`, #37) y `GET /health` informa si el modelo y la base están disponibles. Con `POST /feedback` se registra la clase real de una predicción y `GET /metrics` calcula con ese feedback la exactitud en vivo, la cobertura, la confianza media y la exactitud por clase (#35). Falta la detección de *data drift* y una alerta automática. |
 | ¿Cada cuánto hay que reentrenar? | ⬜ Por decidir. |
 | ¿Qué pasa si el modelo se equivoca? ¿Hay revisión humana? | La API devuelve `confidence` y las probabilidades de las 7 clases, para que una persona revise los casos dudosos. La revisión humana no está implementada. ⬜ |
 
-#### D10.1 · API con FastAPI y dos endpoints  (✅)
+#### D10.1 · API con FastAPI: predicción y estado  (✅)
 
-**Decisión:** exponer el modelo con FastAPI en `app/api.py`: `GET /health` (`status`, `model_loaded`, `db_connected`, `detail`, `db_detail`) y `POST /predict`, que devuelve `cover_type` (1–7), `class_name`, `confidence`, `probabilities` y `prediction_id` (la fila guardada en la base de datos, #37; `null` si la base no está disponible).
+**Decisión:** exponer el modelo con FastAPI en `app/api.py`: `GET /health` (`status`, `model_loaded`, `db_connected`, `detail`, `db_detail`) y `POST /predict`, que devuelve `cover_type` (1–7), `class_name`, `confidence`, `probabilities` y `prediction_id` (la fila guardada en la base de datos, #37; `null` si la base no está disponible). Desde #35 la API tiene además `POST /feedback` y `GET /metrics` (ver D10.7).
 
 **Justificación:** separar el modelo de la interfaz permite que la app, scripts o cualquier cliente lo usen igual. `/health` permite comprobar el servicio sin predecir.
 
@@ -1040,6 +1054,34 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 **Explicación sencilla:** una receta que dice la versión exacta de cada ingrediente y los pasos para cocinarla. Para saber si funciona, la cocinamos en una cocina vacía.
 
 **Evidencia:** issue #46 · `requirements.txt` · `docs/REPRODUCIBILITY.md` · `specs/feature-46-reproducibility-requirements-run-steps.md`.
+
+**Responsable:** @Leandroletoile y equipo.
+
+---
+
+#### D10.7 · Feedback y métricas de producción  (✅)
+
+**Decisión:** añadir a la API `POST /feedback`, que recibe `prediction_id`, `true_cover_type` (1 a 7) y un `comment` opcional y guarda la clase real, y `GET /metrics`, que devuelve el número de predicciones y de feedbacks, la cobertura del feedback, la exactitud medida sobre el feedback (`live_accuracy`), la confianza media y la exactitud por clase. Un `prediction_id` que no existe da 404, una clase fuera de 1 a 7 da 422 y una base de datos caída da 503. Sin datos, las proporciones salen `null` en lugar de dar error.
+
+**Justificación:** sin la clase real no se puede saber si el modelo acierta en producción. Se reutilizó el almacenamiento de #37 y solo se añadió la lectura agregada (`feedback_metrics()`), con consultas que funcionan igual en SQLite y en MySQL. La interfaz que llame a estos endpoints no forma parte de este ticket.
+
+**Explicación sencilla:** un buzón para decir "la respuesta correcta era esta" y un marcador que cuenta cuántas veces acertó el modelo según esas respuestas.
+
+**Evidencia:** issue #35 · PR #102 · `app/api.py`, `app/schemas.py`, `src/database.py` · `docs/APP.md` · `specs/feature-35-m6-feedback-collection-system.md` (la spec indica que `python src/database.py` comprueba `feedback_metrics()`).
+
+**Responsable:** @carovasq.
+
+---
+
+#### D10.8 · Guía de uso de Docker  (✅)
+
+**Decisión:** reunir en `docs/DOCKER.md` lo necesario para ejecutar el proyecto con Docker Compose: arranque rápido, qué hace cada servicio (`app`, `db`) y cada volumen, variables de entorno, la imagen, comandos habituales, una tabla de problemas y soluciones, y los límites conocidos. Se enlaza desde `README.md` y `docs/REPRODUCIBILITY.md`.
+
+**Justificación:** los fallos que encontramos al probar desde cero eran de entorno y no de código: Docker Desktop apagado, el puerto 3306 ocupado por un MySQL local (se resuelve con `MYSQL_PORT=3307`, #46), un nombre de contenedor ya usado por otra copia del proyecto, o `exec` sobre un servicio que no arrancó. Dejarlos escritos con su mensaje de error evita repetir el diagnóstico.
+
+**Explicación sencilla:** el manual de la caja: qué hay dentro, cómo se enciende y qué mirar cuando una luz se pone roja.
+
+**Evidencia:** issue #47 · PR #100 · `docs/DOCKER.md` · `specs/feature-47-docker-compose-usage-docs.md`. Probado en Windows con Docker Desktop (Compose v5.5.1): `docker compose up -d --build` levantó `app` y `db` (healthy en 16 s) con los puertos 8501 y 3307, `src/database.py` pasó dentro del contenedor y una segunda copia de la pila falló con el conflicto de nombre que recoge la tabla. Las filas que describen el comportamiento estándar de Docker no se ejecutaron (la spec las lista).
 
 **Responsable:** @Leandroletoile y equipo.
 
