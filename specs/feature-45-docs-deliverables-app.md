@@ -88,8 +88,28 @@ prints `EXISTS`, and neither file contains `_To be filled`.
 
 Observed (2026-11-17):
 
-- All 92 relative links across `docs/DELIVERABLES.md` (67 links) and
-  `docs/APP.md` (25 links) resolved and printed `EXISTS` (0 `MISSING`).
+- All relative links across `docs/DELIVERABLES.md` and `docs/APP.md` resolved
+  and printed `EXISTS` (0 `MISSING`). A second check that also resolves the
+  `#anchor` fragments against the target headings found 0 broken anchors.
 - Neither `docs/DELIVERABLES.md` nor `docs/APP.md` contains `_To be filled`.
 - `git status --short` shows only `specs/feature-45-docs-deliverables-app.md`,
   `docs/DELIVERABLES.md` and `docs/APP.md`.
+
+Review fixes (2026-11-17, after rebasing onto `develop` with #26 and #29
+merged):
+
+- `docs/DELIVERABLES.md`: hyperparameter optimization marked done with the #29
+  results (Random Forest `0.9123 → 0.9326`, XGBoost `0.8489 → 0.9240`, 5-fold
+  macro F1), noting that the exported pipeline of #32 still uses the default
+  Random Forest; feature importance marked done (#26) with error analysis still
+  pending (#27); issue count corrected to 54; board link points to the Team 5
+  project (`/orgs/IA-P1-BCN/projects/61`) instead of the organization list.
+- `docs/APP.md`: `docker-compose.yml` only publishes port `8501`, so the
+  documented `docker compose exec app uvicorn ...` was unreachable from the
+  host (`curl http://localhost:8000/health` failed with exit 7). Replaced with
+  `docker compose run --rm -p 8000:8000 app uvicorn app.api:app --host 0.0.0.0 --port 8000`;
+  verified in Docker that `GET /health` returns `model_loaded: true`,
+  `db_connected: true` and that the documented `POST /predict` payload returns
+  `cover_type` 2 (Lodgepole Pine, `confidence` 0.95) from the host. Clarified
+  that `.env.example` lists only the database variables (`MODEL_PATH` is
+  optional).

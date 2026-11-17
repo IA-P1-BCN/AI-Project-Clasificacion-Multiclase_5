@@ -383,7 +383,9 @@ The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
 
 ### Configuration and environment variables
 
-Runtime settings are read from the environment (see [.env.example](../.env.example)):
+Runtime settings are read from the environment. [.env.example](../.env.example)
+lists the database variables; `MODEL_PATH` is optional and only needed to load
+a model from a non-default path:
 
 | Variable | Default | Used by | Description |
 |---|---|---|---|
@@ -434,11 +436,17 @@ docker compose up --build
 
 - Streamlit UI: <http://localhost:8501>
 - Stop containers (keeping MySQL data in `db_data`): `docker compose down`
-- Run the FastAPI backend inside the running container:
+- Run the FastAPI backend: `docker-compose.yml` only publishes port `8501`, so
+  start the API in a one-off container that publishes port `8000` to the host
+  (it reuses the `db` service and the mounted `models/`):
 
 ```bash
-docker compose exec app uvicorn app.api:app --host 0.0.0.0 --port 8000
+docker compose run --rm -p 8000:8000 app uvicorn app.api:app --host 0.0.0.0 --port 8000
 ```
+
+The API is then reachable at <http://localhost:8000> (Swagger UI at `/docs`)
+and the requests of [4. Query the API](#4-query-the-api) work from the host.
+A permanent `api` service in Compose is tracked in #38.
 
 ### 3. Run locally without Docker
 
