@@ -211,6 +211,8 @@ def analyze_partition(
     pred_cls = int(dominant["Pred"].split()[0])
     return {
         "name": name,
+        "y_pred": y_pred,
+        "proba": proba,
         "pairs": pairs,
         "confidence": confidence_contrast(y_true, y_pred, proba),
         "dominant_pair": (true_cls, pred_cls),
@@ -238,12 +240,7 @@ def main() -> None:
         results[name] = analyze_partition(name, X_part, y_part, y_pred, proba)
 
     val = results["validation"]
-    plot_error_analysis(
-        val["pairs"],
-        y_val,
-        np.asarray(pipeline.predict(X_val)),
-        pipeline.predict_proba(X_val),
-    )
+    plot_error_analysis(val["pairs"], y_val, val["y_pred"], val["proba"])
 
     print("== Error analysis: RandomForest (100 trees), fitted on "
           f"{len(y_train):,} train rows (ticket #27) ==")
