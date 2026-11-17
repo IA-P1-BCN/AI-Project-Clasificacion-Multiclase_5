@@ -467,8 +467,8 @@ block startup. The frontend reaches the backend at `http://api:8000`
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
-lists the database variables; `MODEL_PATH` is optional and only needed to load
-a model from a non-default path:
+lists the database variables plus `MODEL_PATH` and `API_URL` (the Compose
+defaults); change `MODEL_PATH` only to load a model from a non-default path:
 
 | Variable | Default | Used by | Description |
 |---|---|---|---|
@@ -479,6 +479,7 @@ a model from a non-default path:
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
 | `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
 | `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
+| `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
 
 ### Readiness and health checks
 

@@ -42,7 +42,7 @@ What each service and volume does, and the fixes for common errors, are in [DOCK
 ```bash
 cp .env.example .env            # optional; the defaults already work
 docker compose up --build -d
-docker compose ps               # app and db should be running, db healthy
+docker compose ps               # db and api healthy, app running
 ```
 
 Open the Streamlit app at <http://localhost:8501>. It is still the M0
@@ -61,14 +61,16 @@ docker compose exec app python src/export_model.py
 It ends with the validation metrics (accuracy 0.9520, macro F1 0.9186 for
 version `0.1.0`) and a self-check of the exported file.
 
-**Start the API.** Compose does not start it, and port 8000 is not published, so
-run it in a second container of the same image:
+**Load the model in the API.** Compose already started the API (`api` service on
+port 8000), but without a model, and it loads the model only at startup. Restart
+it and wait until it is healthy (20 to 40 seconds):
 
 ```bash
-docker compose run --rm -p 8000:8000 app uvicorn app.api:app --host 0.0.0.0 --port 8000
+docker compose restart api
+docker compose ps               # wait for api to show (healthy)
 ```
 
-In another terminal:
+Then check it:
 
 ```bash
 curl http://localhost:8000/health
@@ -79,7 +81,7 @@ PowerShell: `Invoke-RestMethod http://localhost:8000/health`. Expected:
 <http://localhost:8000/docs>; a request example for `POST /predict` is in
 [APP.md](APP.md).
 
-Stop with `Ctrl+C` in the API terminal and `docker compose down`. The database
+Stop with `docker compose down`. The database
 rows stay in the `db_data` volume; `docker compose down -v` deletes them.
 
 ## 3. Run locally without Docker
@@ -124,11 +126,11 @@ Run it in an empty folder with only `data/raw/covtype.data` copied in.
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | `docker compose up --build -d` | The image builds; `docker compose ps` shows `app` running and `db` healthy |
+| 1 | `docker compose up --build -d` | The images build; `docker compose ps` shows `db` and `api` healthy and `app` running |
 | 2 | `docker compose exec app python scripts/check_imports.py` | Ends with `All ... modules import correctly.` |
 | 3 | `docker compose exec app python src/export_model.py` | Validation accuracy 0.9520, macro F1 0.9186 |
 | 4 | `docker compose exec app python src/database.py` | Read/write checks pass and the MySQL row counts print |
-| 5 | Start the API and call `GET /health` | `model_loaded` and `db_connected` are `true` |
+| 5 | `docker compose restart api`, wait for `(healthy)`, then `GET /health` | `model_loaded` and `db_connected` are `true` |
 | 6 | `POST /predict` with the example of [APP.md](APP.md) | `cover_type` 2 (Lodgepole Pine) |
 | 7 | <http://localhost:8501> | The Streamlit placeholder loads |
 
@@ -143,4 +145,5 @@ Run it in an empty folder with only `data/raw/covtype.data` copied in.
   (`.dockerignore`); run it through Compose, which mounts the first two.
 - On Windows, a security policy such as Application Control can block a
   scikit-learn DLL when you run locally. Use the Docker path in that case.
+- The API loads the model only at startup: after a new export run `docker compose restart api`.
 - The unit tests of #40 will need `pytest`, which is not pinned yet.
