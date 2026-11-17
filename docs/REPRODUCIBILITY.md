@@ -89,6 +89,7 @@ python3.11 -m venv .venv                 # Windows: py -3.11 -m venv .venv
 source .venv/bin/activate                # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python scripts/check_imports.py          # every module imports
+python -m pytest                         # unit tests (#40)
 python src/export_model.py               # trains and writes models/model.joblib
 uvicorn app.api:app --port 8000          # API
 streamlit run app/main.py                # placeholder app (other terminal)
@@ -126,6 +127,7 @@ Run it in an empty folder with only `data/raw/covtype.data` copied in.
 |---|---|---|
 | 1 | `docker compose up --build -d` | The image builds; `docker compose ps` shows `app` running and `db` healthy |
 | 2 | `docker compose exec app python scripts/check_imports.py` | Ends with `All ... modules import correctly.` |
+| 2b | `docker compose exec app python -m pytest` | All tests pass; the gated data/model tests run because `data/` and `models/` are mounted |
 | 3 | `docker compose exec app python src/export_model.py` | Validation accuracy 0.9520, macro F1 0.9186 |
 | 4 | `docker compose exec app python src/database.py` | Read/write checks pass and the MySQL row counts print |
 | 5 | Start the API and call `GET /health` | `model_loaded` and `db_connected` are `true` |
@@ -143,4 +145,7 @@ Run it in an empty folder with only `data/raw/covtype.data` copied in.
   (`.dockerignore`); run it through Compose, which mounts the first two.
 - On Windows, a security policy such as Application Control can block a
   scikit-learn DLL when you run locally. Use the Docker path in that case.
-- The unit tests of #40 will need `pytest`, which is not pinned yet.
+- The unit tests (#40) run with `pytest` (pinned in `requirements.txt`). Tests
+  that need the git-ignored dataset or model skip when those files are absent,
+  so `python -m pytest` passes on a fresh clone and in CI; mount or generate the
+  artifacts (Docker, or `python src/export_model.py`) to run them.
