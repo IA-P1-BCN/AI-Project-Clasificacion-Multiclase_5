@@ -10,6 +10,7 @@ from ab_testing import (
     build_report,
     choose_variant,
     decide,
+    mcnemar_test,
     traffic_share_b,
     two_proportion_ztest,
 )
@@ -163,6 +164,34 @@ def test_report_without_feedback_has_no_accuracy():
     report = build_report(empty)
     assert report["decision"] == "insufficient_data"
     assert report["variants"]["A"]["live_accuracy"] is None
+
+
+def test_mcnemar_known_value():
+    result = mcnemar_test(10, 0)
+    assert result["statistic"] == pytest.approx(8.1)
+    assert result["p_value"] == pytest.approx(0.00443, abs=1e-4)
+
+
+def test_mcnemar_without_difference():
+    assert mcnemar_test(5, 5)["p_value"] == pytest.approx(1.0)
+    assert mcnemar_test(0, 0) == {"statistic": 0.0, "p_value": 1.0}
+
+
+# ---- challenger model ----
+
+def test_label_offset_classifier_exposes_predict_proba(synthetic_xy):
+    pytest.importorskip("lightgbm")
+    xgboost = pytest.importorskip("xgboost")
+    from model_comparison import LabelOffsetClassifier
+
+    X, y = synthetic_xy
+    model = LabelOffsetClassifier(
+        xgboost.XGBClassifier(n_estimators=5, max_depth=3, random_state=42, n_jobs=1)
+    ).fit(X, y)
+    probabilities = model.predict_proba(X)
+    assert probabilities.shape == (len(X), 7)
+    assert list(model.classes_) == list(range(1, 8))
+    assert (probabilities.argmax(axis=1) + 1 == model.predict(X)).all()
 
 
 # ---- storage ----

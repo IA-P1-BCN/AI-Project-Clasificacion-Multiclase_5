@@ -85,6 +85,20 @@ def decide(stats_a: dict, stats_b: dict) -> dict:
     return result
 
 
+def mcnemar_test(only_a_correct: int, only_b_correct: int) -> dict:
+    """McNemar test (continuity-corrected) for two models scored on the same rows.
+
+    `only_a_correct` counts the rows A got right and B wrong, `only_b_correct`
+    the reverse. Rows both models get right or wrong do not matter. Returns the
+    chi-square `statistic` (1 degree of freedom) and its `p_value`.
+    """
+    discordant = only_a_correct + only_b_correct
+    if discordant == 0:
+        return {"statistic": 0.0, "p_value": 1.0}
+    statistic = max(abs(only_a_correct - only_b_correct) - 1, 0) ** 2 / discordant
+    return {"statistic": statistic, "p_value": math.erfc(math.sqrt(statistic / 2))}
+
+
 def build_report(stats: dict) -> dict:
     """Per-variant metrics plus the decision; `stats` is `database.ab_metrics()`."""
     variants = {}
