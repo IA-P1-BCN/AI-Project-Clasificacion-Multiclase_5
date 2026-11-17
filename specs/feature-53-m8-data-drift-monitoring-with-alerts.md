@@ -74,27 +74,27 @@ Copied from issue #53 (optional, only if time allows):
 - [x] Alerting added
 - [x] Drift monitoring and alerts in place
 
-## Verification / Result
-
-- `python -m pytest`: 75 passed. The only test excluded locally is the one that loads
-  the real exported model, because the local virtual environment has another
-  scikit-learn version than the one that exported it (see guide D10.5); CI skips it
-  (no model).
-- `python src/drift_monitoring.py build` (Docker): reference profile built from the
-  406,708 rows of the train split.
-- `python src/drift_monitoring.py simulate` (Docker, validation split): no drift ->
-  200 of 200 windows `ok` (typical highest PSI 0.04, p95 0.062); elevation +100 m is
-  detected in every window and +150 m almost always reaches `alert`; changing the soil
-  type of 30 % of the rows gives PSI 0.86. Full table in
-  [docs/DRIFT_MONITORING.md](../docs/DRIFT_MONITORING.md).
-- Docker with MySQL, `DRIFT_WINDOW=200`, `DRIFT_CHECK_EVERY=200`, 400 identical
-  requests: `/health` reports `drift.enabled: true`; `GET /drift` answers `alert`
-  (12 inputs, highest PSI 8.46) and the oldest window (45 rows) is
-  `insufficient_data`; the automatic check wrote `Data drift ALERT` to the API log
-  (ids 401-600); `check` exited with code 1.
-- Webhook: with `DRIFT_WEBHOOK_URL` pointing to a local listener the API delivered the
-  JSON message (`text`, `content`, `status`, `max_psi`, `alerts`).
-
-Known limits (see the document): input drift only, the reference is not refreshed
-after retraining, no alert history in the database, and it was tested with simulated
+## Verification / Result
+
+- `python -m pytest`: 75 passed. The only test excluded locally is the one that loads
+  the real exported model, because the local virtual environment has another
+  scikit-learn version than the one that exported it (see guide D10.5); CI skips it
+  (no model).
+- `python src/drift_monitoring.py build` (Docker): reference profile built from the
+  406,708 rows of the train split.
+- `python src/drift_monitoring.py simulate` (Docker, validation split): no drift ->
+  200 of 200 windows `ok` (typical highest PSI 0.04, p95 0.062); elevation +100 m is
+  detected in every window and +150 m almost always reaches `alert`; changing the soil
+  type of 30 % of the rows gives PSI 0.86. Full table in
+  [docs/DRIFT_MONITORING.md](../docs/DRIFT_MONITORING.md).
+- Docker with MySQL, `DRIFT_WINDOW=200`, `DRIFT_CHECK_EVERY=200`, 400 identical
+  requests: `/health` reports `drift.enabled: true`; `GET /drift` answers `alert`
+  (12 inputs, highest PSI 8.46) and the oldest window (45 rows) is
+  `insufficient_data`; the automatic check wrote `Data drift ALERT` to the API log
+  (ids 401-600); `check` exited with code 1.
+- Webhook: with `DRIFT_WEBHOOK_URL` pointing to a local listener the API delivered the
+  JSON message (`text`, `content`, `status`, `max_psi`, `alerts`).
+
+Known limits (see the document): input drift only, the reference is not refreshed
+after retraining, no alert history in the database, and it was tested with simulated
 shifts, not real traffic or a real Slack/Discord webhook.
