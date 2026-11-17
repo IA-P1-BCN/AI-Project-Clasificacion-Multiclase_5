@@ -29,15 +29,16 @@
     [.github/workflows/ci.yml](../.github/workflows/ci.yml)). Workflow and rules
     are documented in [CONTRIBUTING.md](../CONTRIBUTING.md) and
     [AGENTS.md](../AGENTS.md) (final M8 audit tracked in #50).
-- [ ] **Technical report with metrics and model analysis.** *(in progress)*
-  - The analysis is complete and documented across [EDA.md](EDA.md) (#7–#11),
+- [x] **Technical report with metrics and model analysis.**
+  - The consolidated report is [TECHNICAL_REPORT.md](TECHNICAL_REPORT.md) (#44):
+    methodology and decisions, model comparison and selection, final metrics on
+    `validation`/`test`, per-class precision/recall/F1, 7×7 confusion matrices,
+    feature importance (MDI + permutation + SHAP) and error analysis, with a
+    documented `pandoc` export to PDF/DOCX.
+  - It consolidates the per-stage records [EDA.md](EDA.md) (#7–#11),
     [PREPROCESSING.md](PREPROCESSING.md) (#12–#18) and
-    [MODELING.md](MODELING.md) (#19–#27, #29: 5-fold `StratifiedKFold`
-    comparison, shortlist, per-class precision/recall/F1, 7×7 confusion
-    matrices on `validation` and `test`, permutation feature importance,
-    error analysis and hyperparameter tuning).
-  - The consolidated technical report is still open (#44), as is the final
-    write-up of the modeling results (#31).
+    [MODELING.md](MODELING.md) (#19–#27, #29). The final write-up of the modeling
+    results (#31) remains open.
 - [ ] **Business presentation (PowerPoint, Canva, etc.).**
   - Tracked in M8 (#48).
 - [ ] **Technical code presentation.**
