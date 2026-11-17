@@ -445,16 +445,22 @@ stored_df = load_new_samples()
 
 The containerized environment is defined in [Dockerfile](../Dockerfile) and
 [docker-compose.yml](../docker-compose.yml) (#1, #37; multi-service frontend +
-backend process orchestration and detailed Docker guide tracked in #38 and
-#47):
+backend orchestration added in #38; detailed Docker usage guide tracked in #47):
 
 | Service | Container | Image / Build | Port | Purpose |
 |---|---|---|---|---|
-| `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Application runtime with mounted `./app`, `./src`, `./data` and `./models` volumes |
+| `api` | `multiclass_api` | Built from [Dockerfile](../Dockerfile), command overridden to `uvicorn app.api:app` | `8000:8000` | FastAPI backend; serves the model from the read-only `./models` mount and persists to `db` |
+| `app` | `multiclass_app` | Built from [Dockerfile](../Dockerfile) (`python:3.11-slim` + `libgomp1` + [requirements.txt](../requirements.txt)) | `8501:8501` | Streamlit frontend with mounted `./app`, `./src`, `./data` and `./models` volumes |
 | `db` | `multiclass_db` | `mysql:8.0` | `${MYSQL_PORT:-3306}:3306` (host port configurable) | Relational database for `predictions` and `feedback`, backed by persistent volume `db_data` |
 
-The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
-(`condition: service_healthy`) before starting.
+The `api` and `app` services share the same image: `api` overrides the command
+with `uvicorn`, `app` uses the image default (`streamlit run app/main.py`).
+Startup is ordered by healthchecks: `api` waits for `db`
+(`mysqladmin ping` TCP healthcheck) and exposes its own `GET /health` check, and
+`app` waits for `api` to be healthy (`condition: service_healthy`). `GET /health`
+returns 200 even without a model or database, so a missing artifact does not
+block startup. The frontend reaches the backend at `http://api:8000`
+(`API_URL`); both reach the database at `db:3306`.
 
 ## Deployment
 

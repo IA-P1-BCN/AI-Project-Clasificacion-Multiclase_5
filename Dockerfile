@@ -23,8 +23,10 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy the rest of the project
 COPY . .
 
-# Streamlit default port
-EXPOSE 8501
+# One image shared by both app services (docker-compose.yml):
+#   - frontend (service "app"): uses the default CMD below (Streamlit, 8501)
+#   - backend  (service "api"): overrides the command with uvicorn (8000)
+EXPOSE 8501 8000
 
-# Base command: launch the Streamlit app
+# Default command: launch the Streamlit frontend
 CMD ["streamlit", "run", "app/main.py", "--server.port=8501", "--server.address=0.0.0.0"]
