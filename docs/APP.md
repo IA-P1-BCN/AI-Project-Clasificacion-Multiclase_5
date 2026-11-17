@@ -484,7 +484,7 @@ The exported model ([Model export](#model-export)) is a 100-tree
 | Provider | Free RAM | Real model fits | Decision |
 |---|---|---|---|
 | **Hugging Face Spaces** (Docker SDK) | 16 GB, 2 vCPU | Yes | **Chosen** |
-| Render (Docker web service) | 512 MB | No (would need a synthetic or smaller model) | Discarded |
+| Render (Docker web service, [render.yaml](../render.yaml)) | 512 MB | No (would need the synthetic bootstrap model or a smaller model) | Kept as alternative |
 | Streamlit Community Cloud | ~1 GB | Borderline; no FastAPI process, 100 MB GitHub file limit | Discarded |
 | Vercel | Serverless (250 MB bundle) | No; no long-running Streamlit/WebSocket server | Discarded |
 
@@ -538,7 +538,7 @@ defaults and the Space settings add the model variables:
 | Variable | Default | Used by | Description |
 |---|---|---|---|
 | `SERVICE_ROLE` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
-| `PORT` | `7860` (Space) / `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port; must match `app_port` in the Space card. |
+| `PORT` | `7860` (Space) / `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port; must match `app_port` in the Space card. Render injects it. |
 | `API_PORT` | `8000` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Loopback port of FastAPI in `SERVICE_ROLE=all`. |
 | `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
 | `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
@@ -589,6 +589,13 @@ defaults and the Space settings add the model variables:
    `https://<owner>-<space>.hf.space`).
 6. **Redeploy after a merge.** The Space does not watch GitHub: use
    **Settings** → **Factory rebuild** to clone the latest `REPO_REF`.
+
+### Alternative: Render
+
+[render.yaml](../render.yaml) remains available (**New +** → **Blueprint** on
+<https://dashboard.render.com>). On the free plan (512 MB) the real model does
+not fit, so the container serves the synthetic bootstrap model unless a paid
+instance with more memory is used together with `MODEL_URL` and `MODEL_SHA256`.
 
 ## Usage
 

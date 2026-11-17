@@ -1,6 +1,7 @@
 """Cloud deployment entrypoint and readiness verifier (issue #39).
 
-Deployment target: Hugging Face Spaces (Docker SDK, see `deploy/huggingface/`).
+Primary target: Hugging Face Spaces (Docker SDK, see `deploy/huggingface/`);
+`render.yaml` is kept as an alternative.
 
 Model provisioning: an existing `MODEL_PATH` is used as-is; otherwise, when
 `MODEL_URL` is set, the exported model is downloaded (optionally checked
