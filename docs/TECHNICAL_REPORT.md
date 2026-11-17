@@ -236,8 +236,9 @@ the 406,708 training rows only.
 
 Every class exceeds F1 0.84, the lowest being Aspen (0.8410). The imbalance
 signature remains: **Aspen (5) has the lowest recall (0.756)** despite high
-precision (0.948) — the forest predicts the minority classes conservatively. Validation figures are essentially identical (macro F1
-0.9186); see [MODELING.md](MODELING.md#results).
+precision (0.948) — the forest predicts the minority classes conservatively.
+Validation figures are essentially identical (macro F1 0.9186); see
+[MODELING.md](MODELING.md#results).
 
 ### Confusion matrix — test set (row-normalized recall %)
 
