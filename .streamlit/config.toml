@@ -1,0 +1,9 @@
+# Streamlit theme: forest-green palette for the Covertype prediction app (#33).
+[theme]
+primaryColor = "#2e7d32"
+backgroundColor = "#f1f8e9"
+secondaryBackgroundColor = "#e8f5e9"
+textColor = "#1b3a1b"
+
+[browser]
+gatherUsageStats = false

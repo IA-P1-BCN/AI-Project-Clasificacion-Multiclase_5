@@ -319,7 +319,18 @@ stored_df = load_new_samples()
 ## Usage
 
 ```bash
+docker compose build
+docker compose run --rm --no-deps backend python src/export_model.py
 docker compose up
 ```
 
-_To be filled in M6._
+Open the app at http://localhost:8501. Click a "Cargar un ejemplo" button and
+"Predecir cobertura forestal": the predicted species appears with its photo,
+botanical facts, confidence and the per-class probabilities.
+
+Local development (no Docker) needs two terminals:
+
+```bash
+uvicorn app.api:app --port 8000   # terminal 1: backend (loads the model)
+streamlit run app/main.py         # terminal 2: frontend
+```
