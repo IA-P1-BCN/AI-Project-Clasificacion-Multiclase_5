@@ -27,9 +27,9 @@ multi-process orchestration that `#47`/`docs/APP.md` explicitly defer here.
   - Mount the model artifact (`./models`) into both services; read-only in the
     `api` service, which only serves it.
   - `Dockerfile`: keep a single shared image; the default `CMD` launches the
-    Streamlit frontend, the `api` service overrides the command. Add an image
-    `HEALTHCHECK`-friendly setup (no new system packages; healthchecks use the
-    Python interpreter already in the image).
+    Streamlit frontend, the `api` service overrides the command. No new system
+    packages — the Compose healthchecks use the Python interpreter already in
+    the image.
   - `.env.example`: document `MODEL_PATH` and the `API_URL` the frontend uses to
     reach the backend.
   - Update the Dockerization table in `docs/APP.md` to list the three services.
@@ -122,3 +122,9 @@ Result (2026-11-17, Windows + Docker Desktop, Compose v5.7.0, Engine 29.9.3):
 - Model mount is read-only in `api` (`touch /app/models/...` -> "Read-only file
   system") and writable in `app`. `docker compose down` stopped the stack and
   kept the `db_data` volume.
+- Flow with a model: `docker compose exec app python src/export_model.py` wrote
+  `models/model.joblib` (the `api` reads it via its read-only mount), then
+  `docker compose restart api` reloaded it. `GET /health` -> `model_loaded: true`,
+  `db_connected: true`; `POST /predict` -> HTTP 200
+  `{"cover_type":2,"class_name":"Lodgepole Pine","confidence":0.95,...,"prediction_id":1}`
+  (the prediction was persisted to MySQL).

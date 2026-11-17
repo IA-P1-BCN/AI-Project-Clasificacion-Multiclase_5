@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Live-reload source during development
+      # Mount source for local edits (restart the service to apply; no hot reload)
       - ./app:/app/app
       - ./src:/app/src
       - ./data:/app/data
@@ -39,7 +39,7 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Live-reload source during development
+      # Mount source for local edits (restart the service to apply; no hot reload)
       - ./app:/app/app
       - ./src:/app/src
       - ./data:/app/data

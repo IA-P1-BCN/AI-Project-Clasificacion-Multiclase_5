@@ -445,7 +445,7 @@ stored_df = load_new_samples()
 
 The containerized environment is defined in [Dockerfile](../Dockerfile) and
 [docker-compose.yml](../docker-compose.yml) (#1, #37; multi-service frontend +
-backend orchestration added in #38; detailed Docker usage guide tracked in #47):
+backend orchestration added in #38; detailed usage guide in [DOCKER.md](DOCKER.md), #47):
 
 | Service | Container | Image / Build | Port | Purpose |
 |---|---|---|---|---|
@@ -508,13 +508,16 @@ Place `covtype.data` under `data/raw/covtype.data` (see
 # With Docker Compose:
 docker compose up -d --build
 docker compose exec app python src/export_model.py
+# The api service loads the model once at startup, so reload it after exporting:
+docker compose restart api
 
 # Or locally in a Python 3.11 virtual environment:
 python src/export_model.py
 ```
 
 This creates `models/model.joblib` and `models/model_metadata.json` (both
-git-ignored).
+git-ignored). After the restart, `GET http://localhost:8000/health` reports
+`model_loaded: true`.
 
 ### 2. Run with Docker Compose
 
@@ -522,19 +525,12 @@ git-ignored).
 docker compose up --build
 ```
 
-- Streamlit UI: <http://localhost:8501>
+This starts all three services (`db`, `api`, `app`):
+
+- Streamlit frontend: <http://localhost:8501>
+- FastAPI backend: <http://localhost:8000> (Swagger UI at `/docs`); the requests
+  of [4. Query the API](#4-query-the-api) work from the host.
 - Stop containers (keeping MySQL data in `db_data`): `docker compose down`
-- Run the FastAPI backend: `docker-compose.yml` only publishes port `8501`, so
-  start the API in a one-off container that publishes port `8000` to the host
-  (it reuses the `db` service and the mounted `models/`):
-
-```bash
-docker compose run --rm -p 8000:8000 app uvicorn app.api:app --host 0.0.0.0 --port 8000
-```
-
-The API is then reachable at <http://localhost:8000> (Swagger UI at `/docs`)
-and the requests of [4. Query the API](#4-query-the-api) work from the host.
-A permanent `api` service in Compose is tracked in #38.
 
 ### 3. Run locally without Docker
 
