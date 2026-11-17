@@ -303,8 +303,43 @@ numeric, but this partly reflects a known bias of impurity-based importance
 the low individual scores of the one-hot `Wilderness_Area` and `Soil_Type`
 indicators understate their role rather than measure it. A permutation
 importance, or a gain-based importance (as explored in #18, where `Soil_Type`
-columns rank highly), would order them differently; #23 can revisit this on the
-shared split.
+columns rank highly), would order them differently. The permutation importance
+below (#26) does exactly that on the shared split.
+
+### Feature importance — permutation (validation partition, #26)
+
+Issue #26. Reproduce with: `python src/feature_importance.py`. The Random Forest
+is fitted on the training partition; each feature is then shuffled in the
+held-out **validation** partition (87,152 rows) and the drop in macro F1 is
+measured (`sklearn.inspection.permutation_importance`, `n_repeats=5`,
+`random_state=42`). The model never saw these rows, so the measure is
+leakage-free and model-agnostic, and it does not share the MDI bias toward
+continuous features.
+
+![Random Forest feature importance: MDI vs permutation](figures/feature_importance.png)
+
+| Rank | Feature | Permutation importance (macro F1 drop) |
+|---|---|---|
+| 1 | `Elevation` | 0.4779 |
+| 2 | `Horizontal_Distance_To_Roadways` | 0.2210 |
+| 3 | `Horizontal_Distance_To_Fire_Points` | 0.1646 |
+| 4 | `Wilderness_Area4` | 0.1028 |
+| 5 | `Horizontal_Distance_To_Hydrology` | 0.0810 |
+| 6 | `Vertical_Distance_To_Hydrology` | 0.0556 |
+| 7 | `Soil_Type10` | 0.0356 |
+| 8 | `Wilderness_Area1` | 0.0330 |
+| 9 | `Aspect` | 0.0314 |
+| 10 | `Hillshade_Noon` | 0.0291 |
+
+`Elevation` again dominates by a wide margin, and the three distance features
+remain the strongest numeric predictors, so the two measures agree on the head
+of the ranking. The difference is exactly the bias the MDI note predicted: the
+one-hot indicators climb once the high-cardinality advantage is removed —
+`Wilderness_Area4` rises to 4th (0.1028, vs 11th under MDI) and `Soil_Type10`,
+`Wilderness_Area1` and `Soil_Type3` enter the top 12. So the categorical
+location features matter more to the model's decisions than their low MDI
+scores suggest, while `Elevation` and the distance features are confirmed as the
+dominant drivers of the cover-type prediction.
 
 ## Evaluation metrics
 
