@@ -316,6 +316,9 @@ Issue #29. Reproduce with: `python src/hyperparameter_optimization.py`
   untouched. `Optuna` was rejected to avoid a new dependency and because its
   pruning does not apply to Random Forest; `GridSearchCV` is too slow.
 - **Budget:** Random Forest `n_iter=10`, XGBoost `n_iter=30`.
+- **Features:** the search runs on the canonical `FEATURES` (the 54 cleaned raw
+  columns), without the engineered features of #18; the tuned results do not
+  include feature engineering.
 - **No leakage:** the search fits only on `X_train` / `y_train`; the best
   estimator is re-evaluated with `baseline.evaluate_model` on the same folds.
   The reported tuned score is slightly optimistic because the best parameters
@@ -339,9 +342,14 @@ Issue #29. Reproduce with: `python src/hyperparameter_optimization.py`
 
 Tuning improves both models and makes them more stable (the std drops for both).
 Random Forest remains the primary model (0.9326); the tuned XGBoost (0.9240) is
-now a strong secondary, within ~0.9 points of the forest. The best Random Forest
-grows 400 trees with a depth limit of 50 (the default ran unbounded) — the
-bounded depth should also help the overfitting check of #28.
+now a strong secondary, within ~0.9 points of the forest (its larger +7.5-point
+gain partly reflects a lower starting default of 0.8489). The tuned Random
+Forest grows 400 trees and lets each tree evaluate all 54 features
+(`max_features=None`) instead of a sample; the `max_depth=50` bound barely
+limits a tree on 406,708 rows with `min_samples_leaf=1`, so the gain is more
+plausibly driven by `max_features=None` than by the depth cap. That is a
+hypothesis — the search selects the best combination but does not isolate which
+parameter caused it. The actual overfitting gap is measured in #28, not here.
 
 ## Evaluation metrics
 
