@@ -55,7 +55,8 @@ Decisions and reasons:
   (`split_train_val_test`, #16). Validation and test are untouched. The final
   unbiased verdict comes from #28 (validation) and #25 (test); the search's CV
   score is optimistic because the best parameters are selected on those folds.
-- **Budget — exhaustive:** Random Forest `n_iter=40`, XGBoost `n_iter=50`.
+- **Budget — rápida:** Random Forest `n_iter=10`, XGBoost `n_iter=30` (reduced
+  from the exhaustive 40 / 50 to keep the search within about an hour).
 - **Comparison:** the best estimator is re-evaluated with
   `baseline.evaluate_model` (the shared protocol) against the defaults recorded
   in #23 (Random Forest macro F1 0.9124, XGBoost 0.8514). If a model does not
@@ -65,11 +66,20 @@ Decisions and reasons:
 
 Copied from issue #29:
 
-- [ ] Tuned model improves over default
-- [ ] Best params documented
+- [x] Tuned model improves over default
+- [x] Best params documented
 
 ## Verification
 
-Reproduce with `python src/hyperparameter_optimization.py` (exit 0). Observed:
+Reproduce with `python src/hyperparameter_optimization.py` (exit 0). Observed
+(5-fold CV macro F1, default -> tuned):
 
-_(to be filled after the search run)_
+- Random Forest: 0.9123 -> 0.9326 (+2.0 points). Best params:
+  `n_estimators=400, min_samples_split=5, min_samples_leaf=1, max_features=None,
+  max_depth=50`.
+- XGBoost: 0.8489 -> 0.9240 (+7.5 points). Best params: `learning_rate=0.05,
+  n_estimators=300, max_depth=12, subsample=0.8, colsample_bytree=0.8,
+  min_child_weight=3, reg_lambda=0.0, reg_alpha=1.0`.
+
+Both models improve over their defaults; the tuned Random Forest remains the
+primary model and the tuned XGBoost is now a strong secondary.

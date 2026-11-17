@@ -17,8 +17,8 @@ from gradient_boosting import build_models
 from model_comparison import LabelOffsetClassifier
 from random_forest import build_model
 
-RF_N_ITER = 40
-XGB_N_ITER = 50
+RF_N_ITER = 10
+XGB_N_ITER = 30
 
 CV = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
 

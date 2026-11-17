@@ -801,17 +801,24 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 | ¿Vale la pena el tiempo? (suele mejorar menos que tener buenos datos y buenas variables) | ⬜ |
 | ¿Estamos sobreajustando a la validación de tanto probar combinaciones? | ⬜ |
 
-#### D7.1 · (nombre de la decisión)  (⬜)
+#### D7.1 · Afinar Random Forest y XGBoost con RandomizedSearchCV  (✅)
 
-**Decisión:**
+**Decisión:** afinar los dos modelos del shortlist (Random Forest primario, XGBoost secundario) con `RandomizedSearchCV` bajo el protocolo común (5 folds estratificados, macro F1), sobre el train canónico y sin tocar validación ni test.
 
 **Justificación:**
+- **Método `RandomizedSearchCV`:** sin dependencia nueva (`Optuna` se descarta) y con presupuesto controlable; `GridSearchCV` sería combinatoriamente demasiado lento para Random Forest en 406.708 filas.
+- **Presupuesto rápido:** Random Forest `n_iter=10` y XGBoost `n_iter=30` (se redujo del exhaustivo 40/50 para no esperar horas).
+- **Resultado (5-fold CV, macro F1):**
+  - Random Forest: **0,9123 → 0,9326** (+2,0 puntos) y más estable (std 0,0029 → 0,0019).
+  - XGBoost: **0,8489 → 0,9240** (+7,5 puntos) y más estable (std 0,0027 → 0,0016).
+- **Mejores parámetros:** RF `n_estimators=400, max_depth=50, min_samples_leaf=1, min_samples_split=5, max_features=None`; XGBoost `learning_rate=0.05, n_estimators=300, max_depth=12, subsample=0.8, colsample_bytree=0.8, min_child_weight=3, reg_lambda=0, reg_alpha=1`.
+- **Sin fuga:** la búsqueda solo ajusta sobre `X_train`/`y_train`; el número afinado es un pelín optimista (elegimos la mejor combinación sobre esos folds) — el veredicto imparcial lo dan #28 (validación) y #25 (test).
 
-**Explicación sencilla:**
+**Explicación sencilla:** el modelo por defecto ya iba bien, pero venía "de fábrica". Probar varias configuraciones y quedarnos con la mejor fue como ajustar los mandos: Random Forest ganó 2 puntos de macro F1 usando más árboles (400) y limitando su profundidad a 50; XGBoost fue el gran beneficiado, subiendo 7,5 puntos al bajarle el ritmo de aprendizaje y darle más árboles. Ambos quedaron además más estables entre los distintos pliegues.
 
-**Evidencia:**
+**Evidencia:** issue #29 · `src/hyperparameter_optimization.py` · `docs/MODELING.md` (*Hyperparameter optimization*) · `specs/feature-29-m5-hyperparameter-optimization-gridsearchcv-randomizedsearch-optuna.md`.
 
-**Responsable:**
+**Responsable:** @nagicome03.
 
 ---
 

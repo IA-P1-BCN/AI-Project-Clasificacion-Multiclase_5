@@ -306,6 +306,43 @@ importance, or a gain-based importance (as explored in #18, where `Soil_Type`
 columns rank highly), would order them differently; #23 can revisit this on the
 shared split.
 
+## Hyperparameter optimization
+
+Issue #29. Reproduce with: `python src/hyperparameter_optimization.py`
+
+- **Method:** `RandomizedSearchCV` (scikit-learn) under the shared protocol
+  (`StratifiedKFold(n_splits=5, shuffle=True, random_state=42)`, scoring macro
+  F1), on the canonical train split (406,708 rows). Validation and test are
+  untouched. `Optuna` was rejected to avoid a new dependency and because its
+  pruning does not apply to Random Forest; `GridSearchCV` is too slow.
+- **Budget:** Random Forest `n_iter=10`, XGBoost `n_iter=30`.
+- **No leakage:** the search fits only on `X_train` / `y_train`; the best
+  estimator is re-evaluated with `baseline.evaluate_model` on the same folds.
+  The reported tuned score is slightly optimistic because the best parameters
+  were selected on those folds; the unbiased verdict is #28 (validation) and
+  #25 (test).
+
+### Default vs tuned (5-fold CV, macro F1)
+
+| Model | Default | Tuned |
+|---|---|---|
+| RandomForest (primary) | 0.9123 ± 0.0029 | **0.9326 ± 0.0019** |
+| XGBoost (secondary) | 0.8489 ± 0.0027 | **0.9240 ± 0.0016** |
+
+### Best parameters
+
+- **Random Forest:** `n_estimators=400`, `min_samples_split=5`,
+  `min_samples_leaf=1`, `max_features=None`, `max_depth=50`.
+- **XGBoost:** `learning_rate=0.05`, `n_estimators=300`, `max_depth=12`,
+  `subsample=0.8`, `colsample_bytree=0.8`, `min_child_weight=3`,
+  `reg_lambda=0.0`, `reg_alpha=1.0`.
+
+Tuning improves both models and makes them more stable (the std drops for both).
+Random Forest remains the primary model (0.9326); the tuned XGBoost (0.9240) is
+now a strong secondary, within ~0.9 points of the forest. The best Random Forest
+grows 400 trees with a depth limit of 50 (the default ran unbounded) — the
+bounded depth should also help the overfitting check of #28.
+
 ## Evaluation metrics
 
 - Accuracy
