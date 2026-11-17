@@ -39,7 +39,7 @@ per-prediction attribution of why the model decides each class.
 | `docs/figures/shap_beeswarm.png` | New: beeswarm for the representative class. |
 | `docs/figures/shap_dependence_elevation.png` | New: dependence plot for `Elevation`. |
 | `docs/MODELING.md` | New *Model interpretability (SHAP)* subsection under the M5 results. |
-| `requirements.txt` | Add `shap==0.54.1` (new dependency). |
+| `requirements.txt` | Add `shap==0.51.0` (new dependency). |
 
 Decisions:
 
@@ -65,8 +65,10 @@ Decisions:
 - **Plots.** Summary bar (all classes), beeswarm for the majority class
   Lodgepole Pine (shows effect direction), dependence for `Elevation` (the top
   feature of #26 and η² 0.616). matplotlib `Agg`, headless.
-- **New dependency:** `shap==0.54.1` (declared here and in the PR). No other new
-  dependency: numpy, pandas, matplotlib, scikit-learn are already pinned.
+- **New dependency:** `shap==0.51.0` (declared here and in the PR) — the last
+  release compatible with the project's pinned Python 3.11 (0.52+ require
+  Python >=3.12). No other new dependency: numpy, pandas, matplotlib,
+  scikit-learn are already pinned.
 
 ## Acceptance criteria
 

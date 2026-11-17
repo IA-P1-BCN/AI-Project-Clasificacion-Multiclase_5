@@ -12,8 +12,9 @@ seaborn==0.13.2
 xgboost==2.1.1
 lightgbm==4.5.0
 
-# Interpretability (#30)
-shap==0.54.1
+# Interpretability (#30). 0.51.0 is the last release supporting Python 3.11
+# (the project's pinned version); 0.52+ requires Python >=3.12.
+shap==0.51.0
 
 # App (frontend + backend + database)
 streamlit==1.38.0
