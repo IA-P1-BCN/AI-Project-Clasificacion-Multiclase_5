@@ -42,16 +42,31 @@ and branch-cleanup procedures are documented in one place.
 | File | Change |
 |---|---|
 | `CONTRIBUTING.md` | Expand *Branch model* (`feature/<issue>-<slug>`, `fix/<issue>-<slug>`, `docs/<slug>`), add *Spec-driven workflow and staging rules*, add *Pull requests, squash/merge and branch cleanup*, and add *Governance audit checks*. |
+| `AGENTS.md` | Add the `docs/<short-kebab-description>` branch prefix so it matches `CONTRIBUTING.md`. |
 | `specs/feature-50-git-governance.md` | Record the M0–M8 branch, commit, spec-coverage and untracked-artifact audit results. |
 
 Decisions and reasons:
 
-- **Do not rewrite `origin/develop` or `origin/main`.** All 40 pull requests
-  (#54–#93) merged into `develop` follow Conventional Commits (`feat`, `fix`,
-  `docs`, `chore`, `ci`, `style`, `refactor`) and carry their branch specs under
-  `specs/`. Rewriting shared history on `develop` would invalidate open teammate
-  branches (#29, #33, #43). Instead, we clean local already-merged branches and
-  document the squash-merge / cleanup workflow in `CONTRIBUTING.md`.
+- **Do not rewrite `origin/develop` or `origin/main`.** The "squash/clean
+  commit history" task is interpreted as *keep history clean going forward*,
+  not as squashing published history. All pull requests merged into `develop`
+  since #54 follow Conventional Commits (`feat`, `fix`, `docs`, `chore`, `ci`,
+  `style`, `refactor`) and carry their branch specs under `specs/`. Squashing
+  or rebasing shared history on `develop` would require a force-push and
+  invalidate open teammate branches (PRs #97, #99, #100 at the time of
+  writing). Instead, we clean local already-merged branches and document the
+  squash-merge / cleanup workflow in `CONTRIBUTING.md` so future merges stay
+  readable.
+- **Known non-conventional commits are left as they are.** The pre-M0 commits
+  (`e391018`, `885b567`, `84466c8`, `926c9c5`, `504c35c`) and one early M0
+  commit (`bfd83da refactor spec and readme`, 2026-11-12) do not follow
+  Conventional Commits. They are part of published history and are not
+  rewritten, for the reason above.
+- **`docs/<slug>` prefix added to `AGENTS.md` too.** The team already used
+  `docs/*` branches for documentation-only work without an issue
+  (`docs/ci-spec-results`, `docs/eda-retroactive-specs`). The prefix is
+  documented in both `CONTRIBUTING.md` and `AGENTS.md` so humans and agents
+  follow the same naming rules.
 - **Single source of truth for human and agent contributors.** `AGENTS.md`
   already requires `feature/<issue-number>-<short-kebab-description>`, one spec
   per branch in `specs/`, and explicit-path staging (`git add <path>`), whereas
@@ -65,12 +80,14 @@ Decisions and reasons:
      are tracked by Git.
   2. Every merged issue branch has its corresponding spec in `specs/`.
   3. Non-merge commits on `develop` since M1 follow the Conventional Commits
-     pattern.
+     pattern (known exceptions listed above).
 
 ## Acceptance criteria
 
 - [x] Review branch structure (main/develop + feature branches)
-- [x] Squash/clean commit history
+- [x] Squash/clean commit history: published history is not rewritten (see
+  *Decisions*); merged local branches were removed and the squash-merge and
+  cleanup workflow is documented for future PRs
 - [x] Document contribution flow
 - [x] Repo history clean and branches well managed
 - [x] Zero dataset or model binary artifacts (`data/raw/*`, `data/processed/*`, `models/*.joblib`, `*.pkl`) are tracked in Git (added)
@@ -91,7 +108,8 @@ Observed (2026-11-17):
 
 - Branch & commit audit across `origin/develop` (`2cdac68`): 40 pull requests
   (#54–#93) merged into `develop`, all post-M0 commits follow Conventional
-  Commits (`feat`, `fix`, `docs`, `chore`, `ci`, `style`, `refactor`), and all
+  Commits (`feat`, `fix`, `docs`, `chore`, `ci`, `style`, `refactor`) except
+  `bfd83da refactor spec and readme` (see *Decisions*), and all
   merged feature branches have their specs in `specs/` (`35 files in specs/`).
 - Untracked-artifact check passed: `ok    zero dataset/model artifacts tracked`
   (only `.gitkeep` and `data/README.md` are tracked under `data/` and
