@@ -41,7 +41,7 @@ and branch-cleanup procedures are documented in one place.
 
 | File | Change |
 |---|---|
-| `CONTRIBUTING.md` | Expand *Branch model* (`feature/<issue>-<slug>`, `fix/<issue>-<slug>`, `docs/<slug>`), add *Spec-driven workflow and staging rules*, add *Pull requests, squash/merge and branch cleanup*, and add *Governance audit checks*. |
+| `CONTRIBUTING.md` | Expand *Branch model* (`feature/<issue>-<slug>`, `fix/<issue>-<slug>`, `docs/<slug>`), add *Spec-driven workflow and repository hygiene*, add *Pull requests, squash/merge and branch cleanup*, and add *Governance audit checks*. |
 | `AGENTS.md` | Add the `docs/<short-kebab-description>` branch prefix so it matches `CONTRIBUTING.md`. |
 | `specs/feature-50-git-governance.md` | Record the M0–M8 branch, commit, spec-coverage and untracked-artifact audit results. |
 
@@ -73,14 +73,16 @@ Decisions and reasons:
   `CONTRIBUTING.md` still showed early M0 examples (`feature/m0-docker-infra`)
   and omitted the spec and explicit-staging rules. Aligning `CONTRIBUTING.md`
   ensures humans and agents follow the exact same rules.
-- **Automated governance verification.** Adding a one-liner audit in
-  `CONTRIBUTING.md` lets anyone verify before the M8 release that:
+- **Reproducible governance checks.** `CONTRIBUTING.md` lists one-liner
+  checks anyone can run before the M8 release:
   1. Zero files under `data/raw/`, `data/processed/` or `models/` (other than
      `.gitkeep` and `data/README.md`) and zero `*.joblib` / `*.pkl` artifacts
      are tracked by Git.
-  2. Every merged issue branch has its corresponding spec in `specs/`.
-  3. Non-merge commits on `develop` since M1 follow the Conventional Commits
-     pattern (known exceptions listed above).
+  2. Every relative link in `CONTRIBUTING.md` resolves.
+  3. `git branch -v` and `git log --oneline` for a manual review of branches
+     and commit subjects. Spec coverage and Conventional Commits compliance
+     were audited manually for this spec (see *Observed*); they are not
+     automated.
 
 ## Acceptance criteria
 
@@ -90,7 +92,8 @@ Decisions and reasons:
   cleanup workflow is documented for future PRs
 - [x] Document contribution flow
 - [x] Repo history clean and branches well managed
-- [x] Zero dataset or model binary artifacts (`data/raw/*`, `data/processed/*`, `models/*.joblib`, `*.pkl`) are tracked in Git (added)
+- [x] Zero dataset or model binary artifacts (`data/raw/*`, `data/processed/*`,
+  `models/*.joblib`, `*.pkl`) are tracked in Git (criterion added by this spec)
 
 ## Verification
 
@@ -100,9 +103,8 @@ git branch -v
 ```
 
 Expected: `ok    zero dataset/model artifacts tracked`, `ok    all
-CONTRIBUTING.md links resolve`, and `git branch -v` lists only `develop` and the
-active M7/M8 branches (`feature/45-...`, `feature/46-...`, `feature/50-...`),
-with all 12 previously merged local branches removed.
+CONTRIBUTING.md links resolve`, and `git branch -v` lists none of the 12
+previously merged local branches.
 
 Observed (2026-11-17):
 
@@ -127,5 +129,5 @@ Observed (2026-11-17):
   M7/M8 branches (`feature/45-docs-deliverables-app`,
   `feature/46-reproducibility-requirements-run-steps`,
   `feature/50-git-governance`).
-- `git status --short` shows only `specs/feature-50-git-governance.md` and
-  `CONTRIBUTING.md`.
+- The branch diff against `develop` touches only `AGENTS.md`,
+  `CONTRIBUTING.md` and `specs/feature-50-git-governance.md`.

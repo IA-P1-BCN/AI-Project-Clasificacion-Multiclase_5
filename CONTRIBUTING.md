@@ -10,7 +10,7 @@ We use a simplified **Git Flow**:
 
 | Branch | Purpose |
 |---|---|
-| `main` | Stable, release-ready code. **Protected** — no direct commits; updated by merging `develop` at milestone deliveries. |
+| `main` | Stable, release-ready code. No direct commits (team rule); updated only by merging `develop` at milestone deliveries. |
 | `develop` | Integration branch. Every feature, fix or docs branch merges here first via a Pull Request. |
 | `feature/<issue>-<short-kebab-description>` | New work tied to a GitHub issue. Branches **off `develop`**, merges back into `develop`. |
 | `fix/<issue>-<short-kebab-description>` | Bug fixes tied to an issue (or `fix/<short-kebab-description>` for follow-ups). |
@@ -35,8 +35,8 @@ docs/eda-retroactive-specs
    git checkout -b feature/<issue>-<short-kebab-description> origin/develop
    ```
 
-2. Write the branch specification in `specs/feature-<issue>-<short-kebab-description>.md`
-   **before** writing code (see [specs/README.md](specs/README.md) and the shared
+2. Write the branch specification in `specs/<branch-name-with-dashes>.md`
+   (e.g. `specs/feature-14-feature-scaling.md`) **before** writing code (see [specs/README.md](specs/README.md) and the shared
    vocabulary in [specs/ontology.md](specs/ontology.md)).
 3. Implement the change, run the module (`python src/<module>.py`), verify every
    acceptance criterion, and update the relevant file in `docs/` plus the spec
@@ -46,7 +46,7 @@ docs/eda-retroactive-specs
 
    ```bash
    git add specs/feature-<issue>-<slug>.md src/<module>.py docs/<DOC>.md
-   git commit -m "feat(<scope>): <imperative subject> (#<issue>)" -- specs/feature-<issue>-<slug>.md src/<module>.py docs/<DOC>.md
+   git commit -m "feat(<scope>): <imperative subject> (#<issue>)"
    ```
 
 5. Push the branch and open a **Pull Request** (`feature/<...>` → `develop`);
@@ -106,7 +106,7 @@ title or commit subject.
 - **Squash or clean merge into `develop`.** When a feature branch has multiple
   work-in-progress or review-fixup commits, prefer **Squash and merge** on
   GitHub (with a Conventional Commit title referencing `(#<issue>)`) so
-  `develop` keeps a linear, readable commit per ticket.
+  `develop` keeps one readable commit per ticket.
 - **Prune merged branches locally.** After a PR is merged into `develop`,
   clean up stale local branches and remote-tracking references:
 
@@ -136,8 +136,8 @@ check locally with `python scripts/check_imports.py`.
 
 ## Governance audit checks
 
-Run these checks from the repository root to verify branch hygiene, untracked
-artifacts and spec coverage:
+Run these checks from the repository root to verify untracked artifacts,
+documentation links and branch hygiene:
 
 ```bash
 # 1. Verify no dataset or model artifacts are tracked in Git
