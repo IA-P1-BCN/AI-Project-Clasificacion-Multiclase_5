@@ -458,16 +458,63 @@ The `app` service waits for `db` to pass its `mysqladmin ping` TCP healthcheck
 
 ## Deployment
 
+Issue #39. Verify the cloud entrypoint, bootstrap model provisioning, database
+initialization, FastAPI endpoints and Streamlit readiness from the project root:
+
+```bash
+docker compose exec app python scripts/start_cloud.py --check
+```
+
+### Cloud provider choice: Render
+
+| Provider | Suitability for this stack | Decision |
+|---|---|---|
+| **Render** (Docker Web Service via `render.yaml`) | Builds the repository's [Dockerfile](../Dockerfile) directly from GitHub on the free tier, supports persistent WebSocket connections required by Streamlit, injects `$PORT`, runs HTTP health checks (`/_stcore/health`) and auto-deploys on every merge to `develop`. | **Chosen** |
+| **Vercel** | Designed for static frontends and short-lived serverless functions (250 MB bundle ceiling, execution timeouts, no long-running Docker container or Streamlit WebSocket server). | Discarded |
+| **AWS** (App Runner / ECS) | Supports Docker containers but requires IAM roles, ECR image registries and paid billing without a zero-config Git-triggered free tier. | Discarded |
+
+### Cloud architecture and `render.yaml`
+
+The declarative Render Blueprint lives in [render.yaml](../render.yaml) and uses
+[scripts/start_cloud.py](../scripts/start_cloud.py) as its entrypoint:
+
+1. **Single-container default (`SERVICE_ROLE=all`):** On Render's free tier,
+   separate web services spin down after inactivity and incur cross-service
+   cold-start delays. `scripts/start_cloud.py` starts the FastAPI backend
+   (`uvicorn app.api:app`) on loopback (`127.0.0.1:8000`), waits for
+   `GET /health` to return HTTP 200, sets `API_URL=http://127.0.0.1:8000`, and
+   launches the Streamlit frontend (`streamlit run app/main.py`) in the
+   foreground on `0.0.0.0:$PORT`. Setting `SERVICE_ROLE=api` or
+   `SERVICE_ROLE=app` runs either service standalone if split across two
+   containers.
+2. **Automatic model bootstrap (`ensure_cloud_model`):** Because
+   `data/raw/covtype.data` (71.7 MiB) and `models/model.joblib` (136.3 MB) are
+   git-ignored, a cloud build from GitHub starts without them, and fitting the
+   full 406,708-row forest would exceed the 512 MB RAM ceiling of a free cloud
+   instance. If `MODEL_PATH` already exists on a mounted disk, it is used as-is;
+   otherwise `ensure_cloud_model()` fits and exports a lightweight 7-class
+   `RandomForestClassifier` pipeline (`model_version = "0.1.0-cloud-bootstrap"`,
+   `random_state=42`) that satisfies the 54-feature serving contract so `/health`
+   reports `model_loaded: true` and `/predict` works immediately.
+3. **Database persistence:** In the cloud (`render.yaml`), `DATABASE_URL`
+   defaults to `sqlite:////app/data/processed/multiclass.db` so `/predict`,
+   `/feedback` and `/metrics` work without an external paid MySQL server; point
+   `DATABASE_URL` to a managed MySQL 8.0 URL to persist across container
+   rebuilds.
+
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
-lists the database variables; `MODEL_PATH` is optional and only needed to load
-a model from a non-default path:
+lists the local Compose variables, and [render.yaml](../render.yaml) sets the
+cloud defaults:
 
 | Variable | Default | Used by | Description |
 |---|---|---|---|
+| `SERVICE_ROLE` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
+| `PORT` | `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port injected by Render. |
+| `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
 | `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
-| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local) | [src/database.py](../src/database.py) | Database connection string (#37). |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local & Render) | [src/database.py](../src/database.py) | Database connection string (#37). |
 | `MYSQL_DATABASE` | `multiclass` | `db` container | MySQL database created on startup. |
 | `MYSQL_USER` | `app` | `db` container | MySQL application user. |
 | `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
@@ -476,15 +523,26 @@ a model from a non-default path:
 
 ### Readiness and health checks
 
-`GET /health` on the FastAPI service returns HTTP 200 with:
+- **Streamlit UI health check (`GET /_stcore/health`):** returns `ok` (HTTP 200)
+  and is used as `healthCheckPath` in [render.yaml](../render.yaml).
+- **FastAPI health check (`GET /health`):** returns HTTP 200 with `status`
+  (`"ok"`), `model_loaded` (`bool`), `db_connected` (`bool`), `detail` and
+  `db_detail`.
 
-- `status`: `"ok"` when the HTTP process is live.
-- `model_loaded` (`bool`) and `detail` (`str | null`): whether
-  `models/model.joblib` is loaded and matches the 54-feature contract.
-- `db_connected` (`bool`) and `db_detail` (`str | null`): whether the configured
-  database responds.
+### Step-by-step cloud deployment on Render
 
-Cloud deployment to a public URL (Render / Vercel / AWS) is tracked in #39.
+1. Push the branch / merge into `develop` on GitHub
+   (`https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`).
+2. Sign in to [Render](https://dashboard.render.com), click **New +** →
+   **Blueprint**, and connect the repository
+   `IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`.
+3. Render automatically detects [render.yaml](../render.yaml) and provisions the
+   Docker web service `multiclass-covertype-app` on the `free` plan tracking
+   `develop`. Click **Apply**.
+4. Once the build finishes, Render starts `python scripts/start_cloud.py`,
+   verifies `GET /_stcore/health`, and publishes the application at its
+   `https://<service-name>.onrender.com` public URL (with `autoDeploy: true`,
+   any new merge to `develop` automatically triggers a redeploy).
 
 ## Usage
 

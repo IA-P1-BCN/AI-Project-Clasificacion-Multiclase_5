@@ -1,0 +1,21 @@
+# Render Blueprint for cloud deployment (issue #39).
+# Deploy from https://dashboard.render.com -> New -> Blueprint -> select this repository.
+services:
+  - type: web
+    name: multiclass-covertype-app
+    runtime: docker
+    plan: free
+    branch: develop
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python scripts/start_cloud.py
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    envVars:
+      - key: SERVICE_ROLE
+        value: all
+      - key: API_URL
+        value: http://127.0.0.1:8000
+      - key: MODEL_PATH
+        value: /app/models/model.joblib
+      - key: DATABASE_URL
+        value: sqlite:////app/data/processed/multiclass.db
