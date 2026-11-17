@@ -96,6 +96,9 @@ only; change every password before any shared or cloud deployment (#39).
 | `MODEL_PATH` | `/app/models/model.joblib` | `api` | Model file loaded by the API inside the container. |
 | `MODEL_B_PATH` | `/app/models/model_b.joblib` | `api` | Challenger model of the A/B test (#52); optional. |
 | `AB_TRAFFIC_B` | `0` | `api` | Share of requests (0 to 1) sent to the challenger. `0` = A/B test off. Restart `api` after changing it. |
+| `DRIFT_WINDOW` | `500` | `api` | Predictions per data drift window (#53). |
+| `DRIFT_CHECK_EVERY` | `500` | `api` | Automatic drift check every N predictions. `0` = off. |
+| `DRIFT_WEBHOOK_URL` | empty | `api` | Optional webhook that receives drift warnings and alerts. From a container, a service on your PC is `http://host.docker.internal:<port>`. |
 | `API_URL` | `http://api:8000` | `app` | Backend URL for the frontend. Nothing uses it yet: the prediction form is #33. |
 
 ## The image

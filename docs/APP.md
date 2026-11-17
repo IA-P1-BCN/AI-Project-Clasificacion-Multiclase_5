@@ -92,6 +92,7 @@ Interactive documentation (Swagger): <http://localhost:8000/docs>.
 | `POST /feedback` | Stores the observed true cover type for a past prediction (#35). |
 | `GET /metrics` | Returns basic production-monitoring metrics from the collected feedback (#35). |
 | `GET /ab/results` | A/B test between two models: metrics per variant and the winner decision (#52, see [AB_TESTING.md](AB_TESTING.md)). `POST /predict` then also returns the `variant` that served the request and accepts `?variant=A\|B` to force it. |
+| `GET /drift` | Data drift of the received inputs: PSI per variable against the training data, by window of predictions, and the status (`ok`, `warning`, `alert`, `insufficient_data`) (#53, see [DRIFT_MONITORING.md](DRIFT_MONITORING.md)). `?windows=N` (1 to 20, default 5) sets how many windows are reported. Answers 503 if the reference profile is missing. |
 
 Example request body (`POST /predict`):
 
@@ -482,6 +483,10 @@ defaults); change `MODEL_PATH` only to load a model from a non-default path:
 | `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
 | `MODEL_B_PATH` | `models/model_b.joblib` | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional: without the file everything is served by `MODEL_PATH`. |
 | `AB_TRAFFIC_B` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
+| `DRIFT_REFERENCE_PATH` | `models/drift_reference.json` | [src/drift_monitoring.py](../src/drift_monitoring.py) | Reference profile of the training inputs (#53). Without it drift monitoring is off. |
+| `DRIFT_WINDOW` | `500` | [src/drift_monitoring.py](../src/drift_monitoring.py) | Predictions per drift window. |
+| `DRIFT_CHECK_EVERY` | `500` | [app/api.py](../app/api.py) | The API checks the latest window every N predictions. `0` turns the automatic check off. |
+| `DRIFT_WEBHOOK_URL` | empty | [src/drift_monitoring.py](../src/drift_monitoring.py) | Optional webhook (Slack, Discord) that receives a message on a drift warning or alert. |
 | `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
 
 ### Readiness and health checks

@@ -1117,6 +1117,22 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 
 ---
 
+#### D10.11 · Monitoreo de data drift con alertas  (✅)
+
+**Decisión:** medir el cambio de las entradas con el PSI (Population Stability Index) de cada una de las 12 variables del modelo contra el conjunto de entrenamiento (406.708 filas, solo train). Las numéricas se dividen en 10 deciles del train y las categóricas (`Wilderness_Area`, `Soil_Type`) tienen un grupo por categoría, juntando en "otros" las de menos del 1 %. Umbrales: menos de 0,1 es `ok`, de 0,1 a 0,25 es `warning` y desde 0,25 es `alert`. Se evalúan ventanas de 500 predicciones consecutivas (mínimo 200; si hay menos, `insufficient_data`). La API revisa la última ventana en segundo plano cada 500 predicciones (`DRIFT_CHECK_EVERY`), escribe la alerta en el log y, si hay `DRIFT_WEBHOOK_URL`, la envía a un webhook de Slack o Discord. `GET /drift` muestra el estado y el PSI de cada variable por ventana, y `python src/drift_monitoring.py {build|check|simulate}` hace lo mismo desde la terminal (`check` termina con código 1 solo si hay `alert`).
+
+**Justificación:** el PSI no necesita etiquetas, así que funciona desde la primera petición; el feedback de #35 llega tarde y es parcial. Es una métrica estándar, comparable entre variables y sin dependencias nuevas. Los umbrales son los habituales y se comprobaron con datos reales: sin drift, 200 de 200 ventanas salieron `ok` (PSI máximo típico 0,04, percentil 95 de 0,062); con la elevación desplazada +100 m se detecta el 100 % de las ventanas, con +150 m casi todas llegan a `alert`, y con +50 m solo el 8 % (es 0,18 desviaciones estándar); cambiar el tipo de suelo en el 30 % de las filas da PSI 0,86. La referencia completa contra sí misma da 0,0003.
+
+**Limitación:** solo detecta cambios en las entradas, no cambios en la relación entre entradas y clase (concept drift). La referencia no se rehace sola al reenviar un modelo reentrenado (#36): hay que volver a ejecutar `build`. Las alertas van al log y al webhook, no se guarda un historial en la base de datos. El PSI depende de cómo se agrupan los valores y los umbrales son una convención. 🟡 en este punto: se probó con desplazamientos simulados y con peticiones idénticas, no con tráfico real, y el webhook se probó contra un receptor local, no contra Slack ni Discord.
+
+**Explicación sencilla:** es como comparar la foto de los clientes de hoy con la foto de los clientes con los que se aprendió. Si los clientes nuevos son muy distintos de los que el modelo conoció, suena una alarma, aunque todavía no sepamos si el modelo se equivoca más.
+
+**Evidencia:** issue #53 · `src/drift_monitoring.py`, `src/database.py` (`prediction_inputs`), `app/api.py`, `app/schemas.py` · `docs/DRIFT_MONITORING.md` · `specs/feature-53-m8-data-drift-monitoring-with-alerts.md` · `tests/test_drift_monitoring.py` (75 tests pasan en total). Probado en Windows con Docker Desktop y MySQL: con ventana y chequeo de 200, 400 peticiones idénticas dejaron `/drift` en `alert` (12 variables, PSI máximo 8,46), el chequeo automático escribió `Data drift ALERT` en el log de la API (ids 401-600), el webhook llegó a un receptor local con el JSON completo y `check` terminó con código 1.
+
+**Responsable:** @Leandroletoile.
+
+---
+
 # Los 5 errores más comunes (checklist de equipo)
 
 - [ ] **1. Preprocesar antes del split** (fuga de datos). → Primero se reparte, luego se preprocesa. **Estado: parcial.** `feature_scaling.py` (#14), `logistic_regression.py` (#20), `neural_network.py` (#24), `export_model.py` (#32) y `final_metrics.py` (#25) ajustan exclusivamente sobre `train` dentro de un `Pipeline`. Las variables de #18 no aprenden nada de los datos. El EDA usó el dataset completo (ver R1).
