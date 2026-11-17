@@ -37,6 +37,8 @@ Expected: `0a9371cef7c964b5475d6053cc3e0894a5aa6f65ad1ed3ecb01c45aa96217945`.
 
 ## 2. Run with Docker (recommended)
 
+What each service and volume does, and the fixes for common errors, are in [DOCKER.md](DOCKER.md).
+
 ```bash
 cp .env.example .env            # optional; the defaults already work
 docker compose up --build -d

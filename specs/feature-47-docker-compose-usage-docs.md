@@ -55,10 +55,10 @@ Decisions and reasons:
 
 Copied from issue #47:
 
-- [ ] Docker usage documented
-- [ ] `docker compose up` documented
-- [ ] Services and volumes described
-- [ ] Troubleshooting notes added
+- [x] Docker usage documented
+- [x] `docker compose up` documented
+- [x] Services and volumes described
+- [x] Troubleshooting notes added
 
 ## Verification
 
@@ -73,4 +73,13 @@ Copied from issue #47:
    container-name conflict message.
 4. `docker compose config` shows `MYSQL_PORT` honored.
 
-Result: *(filled after the checks)*
+Result (2026-11-17, Windows with Docker Desktop, Compose v5.5.1):
+
+- Every relative link of `docs/DOCKER.md` points to an existing file.
+- `docker compose up -d --build`: `app` started and `db` was healthy in 16 s. The published ports are 8501 and, with `MYSQL_PORT=3307`, 3307. The image and the volume are named after the folder, as the page says.
+- `src/database.py` inside the container: checks passed and MySQL connected. `SELECT COUNT(*) FROM predictions` returned 0 on a new volume.
+- `scripts/check_imports.py` inside the container: all 27 modules import.
+- `docker compose config` shows `published: "3307"` with the variable set.
+- A second copy of the stack started while the first was up failed with `Conflict. The container name "/multiclass_db" is already in use by container ...`; the table uses that message. The attempt left an empty network and volume, removed with `docker compose down -v`.
+- Seen earlier in the #46 clean-clone run: Docker Desktop not running, port 3306 taken by a local MySQL, and `exec` on a service that never started.
+- Not run here: `exec app bash`, `logs -f`, `build --no-cache`, the port 8501 conflict, and the rows that describe standard Docker, Compose and MySQL behavior (variables read only on an empty volume, Compose 2.24 for `env_file` `required`).

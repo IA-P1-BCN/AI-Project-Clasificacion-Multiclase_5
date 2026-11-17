@@ -70,6 +70,7 @@ Multiclass classification is a supervised learning task in which each input inst
 │   ├── MODELING.md
 │   ├── APP.md
 │   ├── REPRODUCIBILITY.md
+│   ├── DOCKER.md
 │   └── DELIVERABLES.md
 ├── data/
 │   ├── README.md          # Dataset source, version, size and checksum
@@ -98,7 +99,7 @@ Then open the app at **http://localhost:8501**. To stop: `Ctrl+C` (or
 `docker compose down`). After changing `requirements.txt` or the `Dockerfile`,
 rebuild with `docker compose up --build`.
 
-Step-by-step run instructions (Docker and local), the pinned environment and a clean-clone checklist: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).
+Step-by-step run instructions (Docker and local), the pinned environment and a clean-clone checklist: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md). What each Docker service and volume does, and the fixes for common errors: [docs/DOCKER.md](docs/DOCKER.md).
 
 ### Dataset
 
