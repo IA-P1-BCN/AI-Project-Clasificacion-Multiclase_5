@@ -306,6 +306,72 @@ def list_feedback(limit: int = 100, db_url: str | None = None) -> list[dict]:
         return rows
 
 
+def feedback_metrics(db_url: str | None = None) -> dict:
+    """Production-monitoring metrics aggregated from stored predictions and feedback.
+
+    Read-only. Returns the prediction and feedback counts, feedback coverage,
+    the live accuracy measured on labelled feedback, the average confidence of
+    the predictions that received feedback, and the per-class feedback accuracy
+    (by true `Cover_Type`). Denominators of zero yield `None` instead of raising,
+    so the endpoint works before any feedback has been collected.
+    """
+    init_db(db_url)
+    with _connect(db_url) as (conn, _, _):
+        predictions_total = int(
+            _execute(conn, "SELECT COUNT(*) AS c FROM predictions").fetchone()["c"]
+        )
+        totals = _execute(
+            conn,
+            "SELECT COUNT(*) AS n, COALESCE(SUM(is_correct), 0) AS correct FROM feedback",
+        ).fetchone()
+        feedback_total = int(totals["n"])
+        correct_total = int(totals["correct"])
+
+        avg_conf_row = _execute(
+            conn,
+            """
+            SELECT AVG(p.confidence) AS avg_conf
+            FROM feedback f JOIN predictions p ON p.id = f.prediction_id
+            """,
+        ).fetchone()
+        avg_confidence = avg_conf_row["avg_conf"]
+
+        per_class_rows = _execute(
+            conn,
+            """
+            SELECT true_cover_type,
+                   COUNT(*) AS n,
+                   COALESCE(SUM(is_correct), 0) AS correct
+            FROM feedback
+            GROUP BY true_cover_type
+            """,
+        ).fetchall()
+
+    counts = {int(r["true_cover_type"]): (int(r["n"]), int(r["correct"])) for r in per_class_rows}
+    per_class = []
+    for cover_type in COVER_TYPES:
+        n, correct = counts.get(cover_type, (0, 0))
+        per_class.append(
+            {
+                "cover_type": cover_type,
+                "class_name": CLASS_NAMES[cover_type],
+                "feedback_count": n,
+                "correct": correct,
+                "accuracy": (correct / n) if n else None,
+            }
+        )
+
+    return {
+        "predictions_total": predictions_total,
+        "feedback_total": feedback_total,
+        "feedback_coverage": (feedback_total / predictions_total) if predictions_total else None,
+        "correct_total": correct_total,
+        "live_accuracy": (correct_total / feedback_total) if feedback_total else None,
+        "average_confidence": float(avg_confidence) if avg_confidence is not None else None,
+        "per_class": per_class,
+    }
+
+
 def db_status(db_url: str | None = None) -> dict:
     """Return connection health and row counts for `/health` and diagnostics; never raises."""
     url = resolve_database_url(db_url)
@@ -398,6 +464,16 @@ def _run_self_checks() -> dict:
 
         status = db_status(url)
         assert status["connected"] and status["predictions_count"] == 2 and status["feedback_count"] == 2
+
+        # Monitoring metrics: 2 feedback entries, 1 correct -> live accuracy 0.5
+        metrics = feedback_metrics(url)
+        assert metrics["predictions_total"] == 2 and metrics["feedback_total"] == 2
+        assert metrics["correct_total"] == 1 and metrics["live_accuracy"] == 0.5
+        assert metrics["feedback_coverage"] == 1.0
+        by_class = {row["cover_type"]: row for row in metrics["per_class"]}
+        assert by_class[2]["feedback_count"] == 1 and by_class[2]["accuracy"] == 1.0
+        assert by_class[1]["feedback_count"] == 1 and by_class[1]["accuracy"] == 0.0
+        assert by_class[3]["feedback_count"] == 0 and by_class[3]["accuracy"] is None
         return status
 
 
@@ -411,6 +487,7 @@ def main() -> None:
         f"(predictions={status['predictions_count']}, feedback={status['feedback_count']})"
     )
     print("Constraint checks (invalid Cover_Type / missing prediction_id rejection): passed")
+    print("Monitoring metrics (feedback_metrics: counts, live accuracy, per-class): passed")
 
     # The checks above run on a temporary SQLite file; also report the configured database.
     if os.getenv("DATABASE_URL"):

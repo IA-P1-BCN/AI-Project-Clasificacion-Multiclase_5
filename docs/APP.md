@@ -32,6 +32,8 @@ Interactive documentation (Swagger): <http://localhost:8000/docs>.
 |---|---|
 | `GET /health` | Service status, whether a model is loaded and whether the database is reachable (`db_connected`, `db_detail`). |
 | `POST /predict` | Validates the input and returns the predicted cover type with its confidence. |
+| `POST /feedback` | Stores the observed true cover type for a past prediction (#35). |
+| `GET /metrics` | Returns basic production-monitoring metrics from the collected feedback (#35). |
 
 Example request body (`POST /predict`):
 
@@ -91,6 +93,80 @@ Cover_Type (1-7) or the encoded labels (0-6) of #15.
 
 If the file is missing or invalid the API still starts: `/health` returns
 `model_loaded: false` with the reason, and `/predict` returns HTTP 503.
+
+## Feedback collection and monitoring
+
+Issue #35. The system closes the loop between a prediction and its observed
+outcome, and exposes how the deployed model is doing on real data. Feedback is
+stored in the `feedback` table (#37), linked to the `predictions` row it refers
+to.
+
+### `POST /feedback`
+
+Records the true cover type for a prediction returned earlier by `POST /predict`
+(the response of which includes a `prediction_id`). The stored row keeps a UTC
+timestamp, the true class and whether the original prediction was correct.
+
+Request body:
+
+```json
+{ "prediction_id": 1, "true_cover_type": 2, "comment": "Verified in the field." }
+```
+
+| Field | Allowed values |
+|---|---|
+| `prediction_id` | integer ≥ 1 — the id returned by `POST /predict` |
+| `true_cover_type` | integer 1 to 7 |
+| `comment` | optional free text, up to 1000 characters |
+
+Response:
+
+```json
+{
+  "feedback_id": 1, "prediction_id": 1,
+  "true_cover_type": 2, "true_class_name": "Lodgepole Pine",
+  "predicted_cover_type": 2, "is_correct": true
+}
+```
+
+| Status | When |
+|---|---|
+| `200` | Feedback stored. |
+| `404` | `prediction_id` does not exist. |
+| `422` | Missing, extra or out-of-range field (e.g. `true_cover_type` outside 1-7). |
+| `503` | Database unreachable; the feedback was not stored. |
+
+### `GET /metrics`
+
+Aggregates the collected feedback into basic production metrics. Counters start
+at zero and ratios are `null` until there is data, so the endpoint works from
+the first request.
+
+```json
+{
+  "predictions_total": 2, "feedback_total": 2, "feedback_coverage": 1.0,
+  "correct_total": 1, "live_accuracy": 0.5, "average_confidence": 0.9,
+  "per_class": [
+    { "cover_type": 1, "class_name": "Spruce/Fir", "feedback_count": 1, "correct": 0, "accuracy": 0.0 },
+    { "cover_type": 2, "class_name": "Lodgepole Pine", "feedback_count": 1, "correct": 1, "accuracy": 1.0 }
+  ]
+}
+```
+
+- **`live_accuracy`** — accuracy measured on labelled feedback (`correct_total /
+  feedback_total`); the production counterpart of the offline accuracy in
+  `docs/MODELING.md`.
+- **`feedback_coverage`** — share of predictions that received feedback.
+- **`average_confidence`** — mean model confidence of the predictions that were
+  given feedback.
+- **`per_class`** — feedback count and accuracy per true `Cover_Type` (1-7), to
+  spot which classes degrade in production.
+
+Reproduce the storage and metrics checks without the server:
+
+```bash
+python src/database.py
+```
 
 ## Model export
 
