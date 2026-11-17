@@ -18,9 +18,8 @@ the deployment procedure documented in `docs/APP.md`.
 ## Scope
 
 - In scope:
-  - Provider selection and justification: **Hugging Face Spaces** (Docker SDK)
-    as primary target, Render (`render.yaml`) kept as alternative, Vercel and
-    Streamlit Community Cloud discarded.
+  - Provider selection and justification: **Hugging Face Spaces** (Docker SDK);
+    Render, Vercel and Streamlit Community Cloud discarded.
   - `deploy/huggingface/README.md` + `deploy/huggingface/Dockerfile`: the two
     files of the Space repository. The Dockerfile clones this public GitHub
     repository at build time (`REPO_REF`, default `develop`), runs as UID 1000
@@ -38,7 +37,7 @@ the deployment procedure documented in `docs/APP.md`.
     4. `--check`: self-cleaning end-to-end verification, including the
        `MODEL_URL` download path through a `file://` URL and a rejected
        SHA-256 mismatch.
-  - `render.yaml`: kept, with a header comment stating its memory limitation.
+  - `render.yaml`: removed (Render is no longer a deployment target).
   - `docs/APP.md`: `## Deployment` rewritten for Hugging Face Spaces.
 - Out of scope:
   - Editing `Dockerfile` or `docker-compose.yml` (#38, @carovasq).
@@ -54,7 +53,7 @@ the deployment procedure documented in `docs/APP.md`.
 | `deploy/huggingface/Dockerfile` | New. Space image: clone repo at `REPO_REF`, install requirements, `PORT=7860`, `CMD python scripts/start_cloud.py`. |
 | `deploy/huggingface/README.md` | New. Space card with front matter (`sdk: docker`, `app_port: 7860`). |
 | `scripts/start_cloud.py` | `sha256_of`, `download_file`, `fetch_remote_model`; `ensure_cloud_model` resolution order; `--check` step 1b; fixes in `label_mapping` call and `/metrics` keys. |
-| `render.yaml` | Header comment only. |
+| `render.yaml` | Deleted. |
 | `docs/APP.md` | `## Deployment` section. |
 
 Decisions and reasons:
