@@ -3,6 +3,7 @@ numpy==1.26.4
 pandas==2.2.2
 scikit-learn==1.5.1
 joblib==1.4.2
+scipy==1.17.1  # needed by scikit-learn; pinned so a new release cannot change it
 
 # Visualization
 matplotlib==3.9.2
@@ -15,6 +16,7 @@ lightgbm==4.5.0
 # App (frontend + backend + database)
 streamlit==1.38.0
 fastapi==0.112.2
+pydantic==2.14.3  # request validation in app/schemas.py; FastAPI only bounds it below 3
 uvicorn[standard]==0.30.6
 PyMySQL==1.1.1
 cryptography==43.0.1  # PyMySQL needs it for the MySQL 8 caching_sha2_password login

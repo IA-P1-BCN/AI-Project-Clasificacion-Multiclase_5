@@ -322,4 +322,4 @@ stored_df = load_new_samples()
 docker compose up
 ```
 
-_To be filled in M6._
+Run steps for Docker and local, the pinned environment and the clean-clone checklist are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md).
