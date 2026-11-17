@@ -26,6 +26,8 @@ from data_cleaning import (  # noqa: E402
 from target_encoding import CLASS_NAMES, DECODE  # noqa: E402
 
 MODEL_PATH = Path(os.getenv("MODEL_PATH", ROOT / "models" / "model.joblib"))
+# Challenger of the A/B test (#52): same contract as the main model.
+MODEL_B_PATH = Path(os.getenv("MODEL_B_PATH", ROOT / "models" / "model_b.joblib"))
 
 
 @dataclass

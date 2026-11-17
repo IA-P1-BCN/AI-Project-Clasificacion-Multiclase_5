@@ -58,6 +58,10 @@ class PredictionResponse(BaseModel):
         default=None,
         description="Database row ID of the logged prediction, or None if persistence was skipped.",
     )
+    variant: str = Field(
+        default="A",
+        description="A/B test variant that served the request: 'A' (control) or 'B' (challenger).",
+    )
 
 
 class FeedbackRequest(BaseModel):
@@ -119,3 +123,42 @@ class MetricsResponse(BaseModel):
         default=None, description="Mean confidence of predictions that received feedback."
     )
     per_class: list[ClassMetric] = Field(..., description="Per-class feedback metrics, Cover_Type 1 to 7.")
+
+
+class ABVariantStats(BaseModel):
+    """Counts of one variant of the A/B test (ticket #52)."""
+
+    variant: str = Field(..., description="'A' (control) or 'B' (challenger).")
+    model_version: str | None = Field(
+        default=None, description="Model version stored with the predictions of this variant."
+    )
+    predictions: int = Field(..., description="Predictions served by this variant.")
+    feedback: int = Field(..., description="Labelled feedback entries received for them.")
+    correct: int = Field(..., description="Of those, how many the variant predicted correctly.")
+    average_confidence: float | None = Field(
+        default=None, description="Mean confidence of the predictions that received feedback."
+    )
+    live_accuracy: float | None = Field(
+        default=None, description="correct / feedback, or null if no feedback yet."
+    )
+
+
+class ABRule(BaseModel):
+    """Thresholds of the winner decision rule."""
+
+    min_feedback_per_variant: int = Field(..., description="Labelled feedback needed per variant.")
+    alpha: float = Field(..., description="Significance level of the two-sided z-test.")
+    min_effect: float = Field(..., description="Smallest accuracy difference that counts as a win.")
+
+
+class ABResultsResponse(BaseModel):
+    """A/B test results and decision (ticket #52)."""
+
+    variants: dict[str, ABVariantStats] = Field(..., description="Metrics of variants 'A' and 'B'.")
+    decision: str = Field(
+        ..., description="winner_A, winner_B, inconclusive or insufficient_data."
+    )
+    difference: float | None = Field(default=None, description="Accuracy of B minus accuracy of A.")
+    z: float | None = Field(default=None, description="z statistic (positive when B is better).")
+    p_value: float | None = Field(default=None, description="Two-sided p-value of the z-test.")
+    rule: ABRule = Field(..., description="Decision rule applied.")

@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 from urllib.parse import urlparse
 
+from ab_testing import VARIANTS
 from data_cleaning import NUMERIC_FEATURES
 from target_encoding import CLASS_NAMES, COVER_TYPES
 
@@ -98,6 +99,7 @@ def init_db(db_url: str | None = None) -> None:
                 id {id_col},
                 created_at_utc VARCHAR(32) NOT NULL,
                 model_version VARCHAR(32) NOT NULL,
+                variant VARCHAR(8) NOT NULL DEFAULT 'A',
                 Elevation DOUBLE NOT NULL,
                 Aspect DOUBLE NOT NULL,
                 Slope DOUBLE NOT NULL,
@@ -132,6 +134,21 @@ def init_db(db_url: str | None = None) -> None:
             )
             """,
         )
+        _ensure_variant_column(conn, backend)
+
+
+def _ensure_variant_column(conn, backend: str) -> None:
+    """Add `predictions.variant` to a table created before the A/B test (#52).
+
+    Existing rows get 'A': they were all served by the model that became the control.
+    """
+    if backend == "sqlite":
+        columns = {r["name"] for r in _execute(conn, "PRAGMA table_info(predictions)").fetchall()}
+        missing = "variant" not in columns
+    else:
+        missing = _execute(conn, "SHOW COLUMNS FROM predictions LIKE 'variant'").fetchone() is None
+    if missing:
+        _execute(conn, "ALTER TABLE predictions ADD COLUMN variant VARCHAR(8) NOT NULL DEFAULT 'A'")
 
 
 def _extract_field(request, name: str):
@@ -144,11 +161,14 @@ def save_prediction(
     request,
     prediction: dict,
     model_version: str = "0.1.0",
+    variant: str = "A",
     db_url: str | None = None,
 ) -> int:
     """Insert a prediction record and return its database `id`."""
     init_db(db_url)
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if variant not in VARIANTS:
+        raise ValueError(f"Invalid variant={variant!r}. Expected one of {VARIANTS}.")
     numeric_vals = [float(_extract_field(request, col)) for col in NUMERIC_FEATURES]
     wilderness = int(_extract_field(request, "Wilderness_Area"))
     soil = int(_extract_field(request, "Soil_Type"))
@@ -158,7 +178,7 @@ def save_prediction(
     probabilities_json = json.dumps(prediction["probabilities"])
 
     columns = (
-        ["created_at_utc", "model_version"]
+        ["created_at_utc", "model_version", "variant"]
         + NUMERIC_FEATURES
         + [
             "Wilderness_Area",
@@ -170,7 +190,7 @@ def save_prediction(
         ]
     )
     values = tuple(
-        [created_at, model_version]
+        [created_at, model_version, variant]
         + numeric_vals
         + [wilderness, soil, cover_type, class_name, confidence, probabilities_json]
     )
@@ -372,6 +392,55 @@ def feedback_metrics(db_url: str | None = None) -> dict:
     }
 
 
+def ab_metrics(db_url: str | None = None) -> dict:
+    """Per-variant counts for the A/B test (#52). Read-only.
+
+    Returns `{"A": {...}, "B": {...}}` with the predictions served, the labelled
+    feedback received, how many of those were correct and their average
+    confidence. A variant without predictions has zeros, so the endpoint works
+    before the test starts. Feedback is counted per feedback row, like `feedback_metrics`.
+    """
+    init_db(db_url)
+    with _connect(db_url) as (conn, _, _):
+        rows = _execute(
+            conn,
+            """
+            SELECT p.variant AS variant,
+                   COUNT(DISTINCT p.id) AS predictions,
+                   COUNT(f.id) AS feedback,
+                   COALESCE(SUM(f.is_correct), 0) AS correct,
+                   AVG(CASE WHEN f.id IS NOT NULL THEN p.confidence END) AS avg_conf,
+                   MAX(p.model_version) AS model_version
+            FROM predictions p LEFT JOIN feedback f ON f.prediction_id = p.id
+            GROUP BY p.variant
+            """,
+        ).fetchall()
+
+    stats = {
+        name: {
+            "variant": name,
+            "model_version": None,
+            "predictions": 0,
+            "feedback": 0,
+            "correct": 0,
+            "average_confidence": None,
+        }
+        for name in VARIANTS
+    }
+    for row in rows:
+        name = str(row["variant"])
+        if name not in stats:
+            continue
+        stats[name].update(
+            model_version=row["model_version"],
+            predictions=int(row["predictions"]),
+            feedback=int(row["feedback"]),
+            correct=int(row["correct"]),
+            average_confidence=float(row["avg_conf"]) if row["avg_conf"] is not None else None,
+        )
+    return stats
+
+
 def db_status(db_url: str | None = None) -> dict:
     """Return connection health and row counts for `/health` and diagnostics; never raises."""
     url = resolve_database_url(db_url)
@@ -481,7 +550,7 @@ def main() -> None:
     print("== Database integration verification (ticket #37) ==")
     status = _run_self_checks()
     print(f"Active driver tested: {status['backend']} (MySQL 8.0 configured in docker-compose.yml)")
-    print("Tables verified: predictions (19 columns), feedback (7 columns, FK -> predictions.id)")
+    print("Tables verified: predictions (20 columns), feedback (7 columns, FK -> predictions.id)")
     print(
         f"CRUD & join checks: passed "
         f"(predictions={status['predictions_count']}, feedback={status['feedback_count']})"

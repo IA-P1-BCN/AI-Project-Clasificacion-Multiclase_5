@@ -68,6 +68,10 @@ class LabelOffsetClassifier(BaseEstimator, ClassifierMixin):
     def predict(self, X):
         return self.estimator_.predict(X) + self.offset_
 
+    def predict_proba(self, X):
+        """Class probabilities, columns ordered like `classes_` (needed to serve the model, #52)."""
+        return self.estimator_.predict_proba(X)
+
 
 def build_registry() -> dict:
     """Map a display name to the unfitted estimator built by its own ticket."""
