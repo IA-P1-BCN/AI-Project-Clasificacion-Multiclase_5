@@ -441,6 +441,24 @@ def ab_metrics(db_url: str | None = None) -> dict:
     return stats
 
 
+def prediction_inputs(limit: int = 5000, db_url: str | None = None) -> list[dict]:
+    """Inputs of the latest `limit` predictions, oldest first (data drift monitoring, #53).
+
+    Each row has `id`, `created_at_utc`, the 10 numeric features, `Wilderness_Area`
+    and `Soil_Type`. Read-only.
+    """
+    init_db(db_url)
+    columns = ["id", "created_at_utc"] + NUMERIC_FEATURES + ["Wilderness_Area", "Soil_Type"]
+    with _connect(db_url) as (conn, ph, _):
+        cursor = _execute(
+            conn,
+            f"SELECT {', '.join(columns)} FROM predictions ORDER BY id DESC LIMIT {ph}",
+            (int(limit),),
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+    return rows[::-1]
+
+
 def db_status(db_url: str | None = None) -> dict:
     """Return connection health and row counts for `/health` and diagnostics; never raises."""
     url = resolve_database_url(db_url)

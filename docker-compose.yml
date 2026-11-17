@@ -23,6 +23,10 @@ services:
       # A/B test (#52): challenger model and share of the traffic sent to it (0 = disabled)
       MODEL_B_PATH: ${MODEL_B_PATH:-/app/models/model_b.joblib}
       AB_TRAFFIC_B: ${AB_TRAFFIC_B:-0}
+      # Data drift monitoring (#53): window size, checks every N predictions (0 = off), optional alert webhook
+      DRIFT_WINDOW: ${DRIFT_WINDOW:-500}
+      DRIFT_CHECK_EVERY: ${DRIFT_CHECK_EVERY:-500}
+      DRIFT_WEBHOOK_URL: ${DRIFT_WEBHOOK_URL:-}
     depends_on:
       db:
         condition: service_healthy

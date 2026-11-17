@@ -138,4 +138,5 @@ Status across the four delivery levels defined in [README.md](../README.md) and
 | Neural network with multiclass support (`MLPClassifier`) | ✅ Done | [MODELING.md](MODELING.md), [src/neural_network.py](../src/neural_network.py) (#24) — `python src/neural_network.py` |
 | Quality-gated model promotion on retraining | ✅ Done | `retrain_pipeline(..., promote=True, min_macro_f1=0.90)` in [src/retraining.py](../src/retraining.py) (#36) |
 | A/B testing between two models (two served versions, traffic split, winner rule) | ✅ Done | [AB_TESTING.md](AB_TESTING.md), [src/ab_testing.py](../src/ab_testing.py), [src/ab_simulation.py](../src/ab_simulation.py) (#52) — `python src/ab_simulation.py` |
-| Model interpretability (`SHAP`), data drift monitoring | ⬜ Optional (`Could`) | Tracked in #30 and #53 |
+| Data drift monitoring (PSI per input, `GET /drift`, automatic check, log and webhook alerts) | ✅ Done | [DRIFT_MONITORING.md](DRIFT_MONITORING.md), [src/drift_monitoring.py](../src/drift_monitoring.py) (#53) — `python src/drift_monitoring.py simulate` |
+| Model interpretability (`SHAP`) | ⬜ Optional (`Could`) | Tracked in #30 |
