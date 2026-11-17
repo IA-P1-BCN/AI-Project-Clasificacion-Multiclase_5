@@ -52,7 +52,7 @@
 | 5 | Baseline | ⬜ Por documentar (hay trabajo hecho en el repo) |
 | 6 | Entrenamiento y validación | 🟡 Desbalanceo (#17), regresión logística (#20) y red neuronal (#24) documentados; faltan árboles y shortlist (#21–#23) |
 | 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
-| 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
+| 8 | Evaluación final | ✅ Métricas finales y matriz de confusión (#25) y overfitting < 5 % verificado (#28) |
 | 9 | Análisis de errores e interpretación | ✅ Errores (#27) e interpretación con SHAP aproximado (#30) documentados |
 | 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38) y guías de ejecución (#46, #47); falta el monitoreo de drift |
 
@@ -845,7 +845,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 | ¿La métrica coincide con la definida en el Paso 0 (macro F1)? | Sí: se reporta **macro F1** como métrica principal (0,9186 en validación y **0,9199 en test**), junto con accuracy, precision/recall/F1 por clase y la matriz de confusión 7×7 (en conteos y en % por fila). (D8.1) |
 | ¿Rinde igual en todos los subgrupos? ¿Hay sesgo? | Rinde muy alto en las clases mayoritarias y alpinas (F1 en test: 0,9584 en Lodgepole Pine, 0,9559 en Krummholz, 0,9497 en Spruce/Fir) y algo más bajo en **Aspen** (clase 5, F1 0,8410, recall 75,56 %, que se confunde un 21,77 % de las veces con Lodgepole Pine) y **Cottonwood/Willow** (clase 4, F1 0,8767, recall 85,44 %, confundida un 12,14 % con Ponderosa Pine). (D8.1) |
 | ¿El resultado en test es parecido al de validación? Si cae mucho, hubo fuga u overfitting. | Es prácticamente idéntico: validación da accuracy **0,9520** y macro F1 **0,9186**; el conjunto de test (87.152 filas nunca vistas) da accuracy **0,9510** (−0,10 pp) y macro F1 **0,9199** (+0,13 pp). No hay caída en test. (D8.1) |
-| ¿Se cumple overfitting < 5 %? | Sí: la diferencia de accuracy entre train (1,0000) y validación (0,9520) es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 %. (D8.1; cierre formal en #28) |
+| ¿Se cumple overfitting < 5 %? | Sí: la diferencia de accuracy entre train (1,0000) y validación (0,9520) es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 %. (D8.2) |
 
 #### D8.1 · Métricas finales y matriz de confusión en validación y test  (✅)
 
@@ -879,6 +879,20 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 **Evidencia:** issue #25 · `src/final_metrics.py` (`python src/final_metrics.py`) · `docs/MODELING.md` (*Results*) · `specs/feature-25-compute-final-metrics.md`.
 
 **Responsable:** @levifvy.
+
+---
+
+#### D8.2 · Verificación formal del overfitting < 5 %  (✅)
+
+**Decisión:** confirmar que el gap de overfitting (accuracy de train menos accuracy de validación) del modelo primario es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 % que exige el enunciado.
+
+**Justificación:** es un requisito duro (*quality gate*) del proyecto. El gap ya lo calculaba `src/final_metrics.py` (#25): train 1,0000 − validación 0,9520 = +0,0480. Como es < 5 %, **no hizo falta** aplicar regularización, un modelo más simple ni más datos (la segunda tarea del issue #28 no aplica). El modelo verificado es el **champion** (el Random Forest sin tunear que exporta y sirve la app, #32); el challenger del test A/B (XGBoost tuneado, #52) tiene su propia evaluación y no es objeto de este ticket.
+
+**Explicación sencilla:** comprobamos que el modelo no se ha "aprendido de memoria" el entrenamiento: acierta el 100 % en train y el 95,2 % en validación, una diferencia de 4,8 puntos, por debajo del tope de 5. Si la diferencia hubiera sido mayor, habría que simplificar el modelo o darle más datos.
+
+**Evidencia:** issue #28 · `src/final_metrics.py` · `docs/MODELING.md` (*Headline metrics across partitions*) · `specs/feature-28-m5-verify-overfitting-5.md`.
+
+**Responsable:** @nagicome03.
 
 ---
 
