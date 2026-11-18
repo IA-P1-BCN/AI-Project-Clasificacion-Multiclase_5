@@ -52,6 +52,6 @@ Copied from issue #31:
 
 The document is self-contained: every model has a section with its CV scores and
 its per-class metrics, the comparison table ranks all of them on the same split,
-and the results, error analysis and SHAP sections close the evaluation. No
-command is needed; the numbers are the ones already produced by `src/` and
-reported in the existing sections.
+and the results, error analysis and SHAP sections close the evaluation. The
+XGBoost/LightGBM numbers reproduce with:
+`python src/model_comparison.py XGBoost LightGBM "DummyClassifier (most_frequent)" "DummyClassifier (stratified)"`.

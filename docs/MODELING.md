@@ -347,8 +347,10 @@ dominant drivers of the cover-type prediction.
 
 ## Ensemble models: XGBoost / LightGBM
 
-Issue #22. Reproduce with: `python src/gradient_boosting.py` (about ten minutes
-on 8 CPU cores).
+Issue #22. Reproduce the canonical-split numbers with:
+`python src/model_comparison.py XGBoost LightGBM "DummyClassifier (most_frequent)" "DummyClassifier (stratified)"`.
+(`src/gradient_boosting.py` reproduces the original #22 run, which used its own
+70/30 partition.)
 
 - **Models:** `XGBClassifier(random_state=42, n_jobs=-1)` and
   `LGBMClassifier(random_state=42, n_jobs=-1, verbosity=-1)` with default
