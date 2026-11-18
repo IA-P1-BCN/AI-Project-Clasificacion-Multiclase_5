@@ -5,16 +5,19 @@ serves the tuned XGBoost of #52 (model B, release `model-b-v1`) as the only
 model: the Random Forest of #32 needs ~1.17 GiB of RAM and does not fit.
 
 Model provisioning: an existing `MODEL_PATH` is used as-is; otherwise, when
-`MODEL_URL` is set, the exported model is downloaded (optionally checked
-against `MODEL_SHA256`); only when neither is available does it fall back to a
-synthetic bootstrap model.
+`MODEL_URL` is set, the exported model is downloaded and checked against
+`MODEL_SHA256`, which is then required. Without a model and without
+`MODEL_URL` startup fails, unless `ALLOW_BOOTSTRAP_MODEL=1` (local development
+only) allows a synthetic bootstrap model.
 
 Supports three runtime modes via `SERVICE_ROLE`:
 - `all` (default): ensures a model artifact is present at
   `MODEL_PATH`, initializes the database, starts the FastAPI backend on
   `127.0.0.1:8000`, waits for `/health` (up to `API_STARTUP_TIMEOUT` seconds,
-  default 300, so a 0.1-CPU instance has time to import and load), and runs
-  the Streamlit frontend in the foreground on `0.0.0.0:$PORT`.
+  default 300, so a 0.1-CPU instance has time to import and load), starts the
+  Streamlit frontend on `0.0.0.0:$PORT` and supervises both: if either exits,
+  the other is stopped and the launcher exits with an error code, so the
+  platform restarts the container.
 - `api`: runs only the FastAPI backend (`uvicorn app.api:app`) on `0.0.0.0:$PORT`.
 - `app`: runs only the Streamlit frontend (`streamlit run app/main.py`) on `0.0.0.0:$PORT`.
 
@@ -58,6 +61,9 @@ CLOUD_BOOTSTRAP_VERSION = "0.1.0-cloud-bootstrap"
 # Seconds `--check` waits for its FastAPI and Streamlit test servers; generous
 # so the self-check does not fail on a busy machine.
 CHECK_TIMEOUT_S = 60.0
+# Opt-in for the synthetic bootstrap model (local development only). Without it
+# a missing model is an error: a public service must not serve fake predictions.
+ALLOW_BOOTSTRAP_ENV = "ALLOW_BOOTSTRAP_MODEL"
 
 # Class-conditional elevation centers (meters) matching Covertype domain ranges
 # so the lightweight cloud fallback produces realistic 7-class probabilities
@@ -156,25 +162,46 @@ def download_file(
     return {"path": str(dest), "size_bytes": size, "sha256": actual}
 
 
-def fetch_remote_model(model_path: Path | None = None, env: dict | None = None) -> dict | None:
-    """Download the exported model from `MODEL_URL` when it is not present yet.
+def require_model_sha256(env: dict) -> str | None:
+    """Return the expected SHA-256 when `MODEL_URL` is set; raise if it is missing.
 
-    Returns None when `MODEL_URL` is unset. When it is set, any failure (network,
-    checksum, serving contract) raises, so a misconfigured deployment fails
-    loudly instead of silently falling back to the synthetic bootstrap model.
-    `MODEL_METADATA_URL` (optional) fetches `model_metadata.json` next to it.
+    The downloaded file is unpickled by `load_model`, so an unchecked download
+    could run arbitrary code: `MODEL_SHA256` is mandatory with `MODEL_URL`.
+    Returns None when `MODEL_URL` is unset.
     """
-    from app.serving import MODEL_PATH, load_model
-
-    env = os.environ if env is None else env
     url = (env.get("MODEL_URL") or "").strip()
     if not url:
         return None
+    sha256 = (env.get("MODEL_SHA256") or "").strip().lower()
+    if not sha256:
+        raise ValueError(
+            "MODEL_URL is set but MODEL_SHA256 is not: refusing to download an "
+            "unchecked model. Set MODEL_SHA256 to the `model_sha256` of the model metadata."
+        )
+    return sha256
+
+
+def fetch_remote_model(model_path: Path | None = None, env: dict | None = None) -> dict | None:
+    """Download the exported model from `MODEL_URL` when it is not present yet.
+
+    Returns None when `MODEL_URL` is unset. When it is set, `MODEL_SHA256` is
+    required (checked before any download) and any failure (network, checksum,
+    serving contract) raises, so a misconfigured deployment fails loudly.
+    `MODEL_METADATA_URL` (optional) fetches `model_metadata.json` next to it.
+    """
+    env = os.environ if env is None else env
+    expected_sha256 = require_model_sha256(env)
+    if expected_sha256 is None:
+        return None
+
+    from app.serving import MODEL_PATH, load_model
+
+    url = env["MODEL_URL"].strip()
     model_path = Path(model_path or MODEL_PATH)
     if load_model(model_path).ready:
         return {"status": "existing", "model_path": str(model_path)}
 
-    info = download_file(url, model_path, env.get("MODEL_SHA256") or None)
+    info = download_file(url, model_path, expected_sha256)
     metadata_url = (env.get("MODEL_METADATA_URL") or "").strip()
     if metadata_url:
         download_file(metadata_url, model_path.with_name("model_metadata.json"))
@@ -196,16 +223,17 @@ def ensure_cloud_model(model_path: Path | None = None, env: dict | None = None) 
     Resolution order:
     1. `model_path` already exists and passes `load_model()`: kept untouched.
     2. `MODEL_URL` is set: the real exported model is downloaded (see
-       `fetch_remote_model`); failures raise instead of falling back.
-    3. Otherwise, fits a lightweight 30-tree RandomForest pipeline on the
-       deterministic 7-class synthetic bootstrap dataset so a container without
-       the git-ignored artifacts still starts. Its predictions are NOT those of
-       the project model (`model_version = "0.1.0-cloud-bootstrap"`).
+       `fetch_remote_model`; `MODEL_SHA256` is required); failures raise.
+    3. Otherwise, startup fails with a clear error. Only with
+       `ALLOW_BOOTSTRAP_MODEL=1` (local development) does it fit a lightweight
+       30-tree RandomForest pipeline on the deterministic 7-class synthetic
+       bootstrap dataset. Its predictions are NOT those of the project model
+       (`model_version = "0.1.0-cloud-bootstrap"`).
     """
-    import joblib
+    env = os.environ if env is None else env
+    require_model_sha256(env)  # invalid configuration fails before anything else
+
     from app.serving import MODEL_PATH, load_model
-    from data_cleaning import FEATURES
-    from export_model import build_pipeline, label_mapping
 
     model_path = Path(model_path or MODEL_PATH)
     loaded = load_model(model_path)
@@ -216,8 +244,19 @@ def ensure_cloud_model(model_path: Path | None = None, env: dict | None = None) 
     if remote is not None:
         return remote
 
+    if (env.get(ALLOW_BOOTSTRAP_ENV) or "").strip() != "1":
+        raise RuntimeError(
+            f"No model at {model_path} and MODEL_URL is unset. Set MODEL_URL and "
+            f"MODEL_SHA256 to download the trained model, or {ALLOW_BOOTSTRAP_ENV}=1 "
+            "to serve a synthetic bootstrap model (local development only)."
+        )
+
+    import joblib
+    from data_cleaning import FEATURES
+    from export_model import build_pipeline, label_mapping
+
     print(
-        "[start_cloud] WARNING: no model at MODEL_PATH and MODEL_URL is unset; "
+        f"[start_cloud] WARNING: {ALLOW_BOOTSTRAP_ENV}=1 and no model at MODEL_PATH; "
         "serving a synthetic bootstrap model, not the trained project model.",
         flush=True,
     )
@@ -303,7 +342,21 @@ def run_self_check() -> int:
         db_path = tmp_path / "cloud_check.db"
         db_url = f"sqlite:///{db_path.as_posix()}"
 
-        model_info = ensure_cloud_model(model_path, env={})
+        try:
+            ensure_cloud_model(tmp_path / "missing" / "model.joblib", env={})
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("without a model and without MODEL_URL startup must fail")
+        try:
+            ensure_cloud_model(tmp_path / "nosha" / "model.joblib", env={"MODEL_URL": "file:///nowhere"})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("MODEL_URL without MODEL_SHA256 must fail before downloading")
+        print("0. Model configuration check: missing model and missing MODEL_SHA256 rejected")
+
+        model_info = ensure_cloud_model(model_path, env={ALLOW_BOOTSTRAP_ENV: "1"})
         print(f"1. Model artifact check: {model_info['status']} ({model_path.stat().st_size / 1024:.1f} KB)")
 
         # Exercise the MODEL_URL download path offline through a file:// URL.
@@ -405,6 +458,36 @@ def run_self_check() -> int:
     return 0
 
 
+def stop_processes(procs, timeout_s: float = 10.0) -> None:
+    """Terminate every running process, killing those that do not stop in time."""
+    for proc in procs:
+        if proc.poll() is None:
+            proc.terminate()
+    for proc in procs:
+        try:
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+def supervise(procs: dict[str, subprocess.Popen], poll_interval_s: float = 1.0) -> int:
+    """Wait until any supervised process exits, stop the others, return an error code.
+
+    Both services must run for the whole life of the container, so any exit is a
+    failure: the child's own exit code is returned, or 1 if it exited with 0.
+    A non-zero launcher exit lets the platform (Render) restart the container
+    instead of keeping a green health check with a dead API.
+    """
+    while True:
+        for name, proc in procs.items():
+            code = proc.poll()
+            if code is not None:
+                print(f"[start_cloud] {name} exited with code {code}; stopping the container.", flush=True)
+                stop_processes([p for p in procs.values() if p is not proc])
+                return code if code != 0 else 1
+        time.sleep(poll_interval_s)
+
+
 def provision() -> int:
     """Ensure the model at MODEL_PATH and initialize the database (child of `run_services`)."""
     from database import init_db
@@ -428,7 +511,10 @@ def run_services() -> int:
 
     # Provision in a child process: its memory (ML imports, model loaded for
     # verification) goes back to the OS before the API loads its own copy.
-    subprocess.run([sys.executable, str(Path(__file__).resolve()), "--provision"], check=True)
+    provisioned = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--provision"])
+    if provisioned.returncode != 0:
+        print("[start_cloud] provisioning failed (see the error above); not starting the services.", flush=True)
+        return provisioned.returncode
 
     if role == "api":
         cmd = [
@@ -465,18 +551,14 @@ def run_services() -> int:
     )
 
     def handle_signal(signum, _frame):
-        for proc in (ui_proc, api_proc):
-            if proc.poll() is None:
-                proc.terminate()
+        # Shutdown requested by the platform: stop both services and exit cleanly.
+        stop_processes([ui_proc, api_proc])
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
-    exit_code = ui_proc.wait()
-    if api_proc.poll() is None:
-        api_proc.terminate()
-    return exit_code
+    return supervise({"FastAPI": api_proc, "Streamlit": ui_proc})
 
 
 def main(argv: list[str] | None = None) -> int:
