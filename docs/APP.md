@@ -626,8 +626,9 @@ defaults). [render.yaml](../render.yaml) sets the cloud values:
 4. Open the public URL `https://<service-name>.onrender.com`, load an example
    and press *Predecir*. The footer must read *XGBoost optimizado (v0.2.0)*.
 5. `autoDeploy: true` redeploys on every push to the branch set in
-   `render.yaml` (`feature/39-cloud-deployment` while testing; the branch to
-   follow after the merge of #39 is a team decision, see PR #116).
+   `render.yaml`: `feature/39-cloud-deployment` while testing, then `main`
+   once it contains this code (team decision, PR #116; steps in
+   [the spec of the branch](../specs/feature-39-cloud-deployment.md)).
 
 ### Verification of the Render setup
 

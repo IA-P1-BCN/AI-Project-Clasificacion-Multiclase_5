@@ -91,13 +91,31 @@ Boundary notes:
   models classify as Aspen (RF 0.72, XGBoost 0.62). The other six examples
   were unchanged and predict their class with both models.
 - `render.yaml` points to `branch: feature/39-cloud-deployment` only to test
-  on Render before the PR. Which branch Render follows after the merge
-  (`develop`, `main` or `autoDeploy: false`) is a **team decision** raised in
-  the review of PR #116; it must be changed before the feature branch is
-  deleted.
+  on Render before the PR. The team decided (review of PR #116) that Render
+  follows `main` with `autoDeploy: true`; the switch is done after `main`
+  contains this code (see *After merging to main*).
 - Removed with the owner's approval: `deploy/huggingface/` (abandoned
   hosting plan) and, outside Git, the abandoned "lite model" files
   (`src/lite_model.py`, untracked; `models/lite_candidates/`, git-ignored).
+
+## After merging to main
+
+Render follows `main` with `autoDeploy: true` (team decision, review of
+PR #116). Until `main` contains this code, `render.yaml` keeps
+`branch: feature/39-cloud-deployment` so the live service keeps deploying.
+**Do not delete `feature/39-cloud-deployment` before step e):** the site would
+keep running but would stop updating. Steps, in this order:
+
+- [ ] a) Check that `main` contains `render.yaml`, `scripts/start_cloud.py` and
+      `app/main.py` from this branch.
+- [ ] b) Change `branch:` to `main` in `render.yaml` (small commit to `main`
+      or to `develop`, following the team's flow).
+- [ ] c) In Render → **Blueprints** → `covertype-classifier` → **Settings**,
+      change the Blueprint branch to `main` and press **Manual sync**.
+- [ ] d) Verify the public URL https://multiclass-covertype-app.onrender.com:
+      health, one prediction and the model footer
+      (*XGBoost optimizado (v0.2.0)*).
+- [ ] e) Only then delete the `feature/39-cloud-deployment` branch.
 
 ## Acceptance criteria
 
