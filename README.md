@@ -100,7 +100,7 @@ Then open the app at **http://localhost:8501**. To stop: `Ctrl+C` (or
 `docker compose down`). After changing `requirements.txt` or the `Dockerfile`,
 rebuild with `docker compose up --build`.
 
-Step-by-step run instructions (Docker and local), the pinned environment and a clean-clone checklist: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md). What each Docker service and volume does, and the fixes for common errors: [docs/DOCKER.md](docs/DOCKER.md). The A/B test between two models (design, decision rule and results): [docs/AB_TESTING.md](docs/AB_TESTING.md). Data drift monitoring of the inputs, with alerts (metric, thresholds and results): [docs/DRIFT_MONITORING.md](docs/DRIFT_MONITORING.md).
+Step-by-step run instructions (Docker and local), the pinned environment and a clean-clone checklist: [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md). What each Docker service and volume does, and the fixes for common errors: [docs/DOCKER.md](docs/DOCKER.md). The A/B test between two models (design, decision rule and results): [docs/AB_TESTING.md](docs/AB_TESTING.md). Data drift monitoring of the inputs, with alerts (metric, thresholds and results): [docs/DRIFT_MONITORING.md](docs/DRIFT_MONITORING.md). The user stories of the project, by type of user and with the issues that implement them: [docs/USER_STORIES.md](docs/USER_STORIES.md).
 
 ### Dataset
 

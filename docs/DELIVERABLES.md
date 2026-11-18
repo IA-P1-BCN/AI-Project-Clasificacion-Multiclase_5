@@ -89,7 +89,7 @@
   - Analysis, preprocessing, modeling and application: [EDA.md](EDA.md)
     (#7–#11), [PREPROCESSING.md](PREPROCESSING.md) (#12–#18),
     [MODELING.md](MODELING.md) (#19–#27, #29), [APP.md](APP.md) (#32, #34, #36, #37,
-    #45), [REPRODUCIBILITY.md](REPRODUCIBILITY.md) (#46), [GUIA_PROYECTO_CLASIFICACION.md](GUIA_PROYECTO_CLASIFICACION.md), and
+    #45), [REPRODUCIBILITY.md](REPRODUCIBILITY.md) (#46), [USER_STORIES.md](USER_STORIES.md), [GUIA_PROYECTO_CLASIFICACION.md](GUIA_PROYECTO_CLASIFICACION.md), and
     branch specs in [specs/](../specs/README.md).
 
 ## Final checklist

@@ -49,11 +49,11 @@ and so that each story can be traced to the issues that implement it.
 
 ## Acceptance criteria
 
-- [ ] `docs/USER_STORIES.md` lists the users and the story format.
-- [ ] Every story has its user, goal, benefit, acceptance criteria, level, issues and status.
-- [ ] Every story points to the issues that implement it and to the document where the result is recorded.
-- [ ] Missing features are marked as not built.
-- [ ] `README.md` and `docs/DELIVERABLES.md` link the document.
+- [x] `docs/USER_STORIES.md` lists the users and the story format.
+- [x] Every story has its user, goal, benefit, acceptance criteria, level, issues and status.
+- [x] Every story points to the issues that implement it and to the document where the result is recorded.
+- [x] Missing features are marked as not built.
+- [x] `README.md` and `docs/DELIVERABLES.md` link the document.
 
 ## Verification
 
