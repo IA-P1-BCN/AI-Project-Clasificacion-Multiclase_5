@@ -55,6 +55,9 @@ RANDOM_STATE = 42
 # Render's free plan has 0.1 CPU: imports plus model loading take ~1 minute.
 API_STARTUP_TIMEOUT_S = float(os.getenv("API_STARTUP_TIMEOUT", "300"))
 CLOUD_BOOTSTRAP_VERSION = "0.1.0-cloud-bootstrap"
+# Seconds `--check` waits for its FastAPI and Streamlit test servers; generous
+# so the self-check does not fail on a busy machine.
+CHECK_TIMEOUT_S = 60.0
 
 # Class-conditional elevation centers (meters) matching Covertype domain ranges
 # so the lightweight cloud fallback produces realistic 7-class probabilities
@@ -347,7 +350,7 @@ def run_self_check() -> int:
             stderr=subprocess.DEVNULL,
         )
         try:
-            health = wait_for_url("http://127.0.0.1:18000/health", timeout_s=25.0)
+            health = wait_for_url("http://127.0.0.1:18000/health", timeout_s=CHECK_TIMEOUT_S)
             assert isinstance(health, dict) and health.get("status") == "ok", health
             assert health.get("model_loaded") is True, health
             assert health.get("db_connected") is True, health
@@ -388,7 +391,7 @@ def run_self_check() -> int:
                 f"live_accuracy={metrics['live_accuracy']}"
             )
 
-            st_health = wait_for_url("http://127.0.0.1:18501/_stcore/health", timeout_s=25.0)
+            st_health = wait_for_url("http://127.0.0.1:18501/_stcore/health", timeout_s=CHECK_TIMEOUT_S)
             print(f"6. Streamlit /_stcore/health check: {st_health}")
         finally:
             for proc in (ui_proc, api_proc):
