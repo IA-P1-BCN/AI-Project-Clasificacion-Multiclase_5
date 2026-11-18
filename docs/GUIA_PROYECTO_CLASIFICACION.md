@@ -52,9 +52,9 @@
 | 5 | Baseline | ⬜ Por documentar (hay trabajo hecho en el repo) |
 | 6 | Entrenamiento y validación | 🟡 Desbalanceo (#17), regresión logística (#20) y red neuronal (#24) documentados; faltan árboles y shortlist (#21–#23) |
 | 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
-| 8 | Evaluación final | ✅ Métricas finales y matriz de confusión documentadas (#25); falta cierre formal de overfitting (#28) |
+| 8 | Evaluación final | ✅ Métricas finales y matriz de confusión (#25) y overfitting < 5 % verificado (#28) |
 | 9 | Análisis de errores e interpretación | ✅ Errores (#27) e interpretación con SHAP aproximado (#30) documentados |
-| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38) y guías de ejecución (#46, #47); falta el monitoreo de drift |
+| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38), guías de ejecución (#46, #47), monitoreo de drift (#53) y test end-to-end (#42); falta el despliegue en la nube (#39) |
 
 ---
 
@@ -845,7 +845,7 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 | ¿La métrica coincide con la definida en el Paso 0 (macro F1)? | Sí: se reporta **macro F1** como métrica principal (0,9186 en validación y **0,9199 en test**), junto con accuracy, precision/recall/F1 por clase y la matriz de confusión 7×7 (en conteos y en % por fila). (D8.1) |
 | ¿Rinde igual en todos los subgrupos? ¿Hay sesgo? | Rinde muy alto en las clases mayoritarias y alpinas (F1 en test: 0,9584 en Lodgepole Pine, 0,9559 en Krummholz, 0,9497 en Spruce/Fir) y algo más bajo en **Aspen** (clase 5, F1 0,8410, recall 75,56 %, que se confunde un 21,77 % de las veces con Lodgepole Pine) y **Cottonwood/Willow** (clase 4, F1 0,8767, recall 85,44 %, confundida un 12,14 % con Ponderosa Pine). (D8.1) |
 | ¿El resultado en test es parecido al de validación? Si cae mucho, hubo fuga u overfitting. | Es prácticamente idéntico: validación da accuracy **0,9520** y macro F1 **0,9186**; el conjunto de test (87.152 filas nunca vistas) da accuracy **0,9510** (−0,10 pp) y macro F1 **0,9199** (+0,13 pp). No hay caída en test. (D8.1) |
-| ¿Se cumple overfitting < 5 %? | Sí: la diferencia de accuracy entre train (1,0000) y validación (0,9520) es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 %. (D8.1; cierre formal en #28) |
+| ¿Se cumple overfitting < 5 %? | Sí: la diferencia de accuracy entre train (1,0000) y validación (0,9520) es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 %. (D8.2) |
 
 #### D8.1 · Métricas finales y matriz de confusión en validación y test  (✅)
 
@@ -879,6 +879,20 @@ El baseline "siempre la mayoritaria" tiene el mejor accuracy pero el peor macro 
 **Evidencia:** issue #25 · `src/final_metrics.py` (`python src/final_metrics.py`) · `docs/MODELING.md` (*Results*) · `specs/feature-25-compute-final-metrics.md`.
 
 **Responsable:** @levifvy.
+
+---
+
+#### D8.2 · Verificación formal del overfitting < 5 %  (✅)
+
+**Decisión:** confirmar que el gap de overfitting (accuracy de train menos accuracy de validación) del modelo primario es **+0,0480 (+4,80 puntos porcentuales)**, por debajo del límite del 5 % que exige el enunciado.
+
+**Justificación:** es un requisito duro (*quality gate*) del proyecto. El gap ya lo calculaba `src/final_metrics.py` (#25): train 1,0000 − validación 0,9520 = +0,0480. Como es < 5 %, **no hizo falta** aplicar regularización, un modelo más simple ni más datos (la segunda tarea del issue #28 no aplica). El modelo verificado es el **champion** (el Random Forest sin tunear que exporta y sirve la app, #32); el challenger del test A/B (XGBoost tuneado, #52) tiene su propia evaluación y no es objeto de este ticket.
+
+**Explicación sencilla:** comprobamos que el modelo no se ha "aprendido de memoria" el entrenamiento: acierta el 100 % en train y el 95,2 % en validación, una diferencia de 4,8 puntos, por debajo del tope de 5. Si la diferencia hubiera sido mayor, habría que simplificar el modelo o darle más datos.
+
+**Evidencia:** issue #28 · `src/final_metrics.py` · `docs/MODELING.md` (*Headline metrics across partitions*) · `specs/feature-28-m5-verify-overfitting-5.md`.
+
+**Responsable:** @nagicome03.
 
 ---
 
@@ -1114,6 +1128,41 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 **Evidencia:** issue #52 · `src/ab_testing.py`, `src/ab_simulation.py`, `src/export_challenger.py`, `src/database.py`, `app/api.py` · `docs/AB_TESTING.md` · `specs/feature-52-m8-ab-testing-between-models.md` · `tests/test_ab_testing.py`. Probado en Windows con Docker Desktop: con `AB_TRAFFIC_B=0.5`, 40 peticiones se repartieron 24 a A y 16 a B, `?variant=B` devolvió B, `?variant=C` dio 422 y una fila guardada antes de la migración quedó como variante A en MySQL.
 
 **Responsable:** @Leandroletoile.
+
+---
+
+#### D10.11 · Monitoreo de data drift con alertas  (✅)
+
+**Decisión:** medir el cambio de las entradas con el PSI (Population Stability Index) de cada una de las 12 variables del modelo contra el conjunto de entrenamiento (406.708 filas, solo train). Las numéricas se dividen en 10 deciles del train y las categóricas (`Wilderness_Area`, `Soil_Type`) tienen un grupo por categoría, juntando en "otros" las de menos del 1 %. Umbrales: menos de 0,1 es `ok`, de 0,1 a 0,25 es `warning` y desde 0,25 es `alert`. Se evalúan ventanas de 500 predicciones consecutivas (mínimo 200; si hay menos, `insufficient_data`). La API revisa la última ventana en segundo plano cada 500 predicciones (`DRIFT_CHECK_EVERY`), escribe la alerta en el log y, si hay `DRIFT_WEBHOOK_URL`, la envía a un webhook de Slack o Discord. `GET /drift` muestra el estado y el PSI de cada variable por ventana, y `python src/drift_monitoring.py {build|check|simulate}` hace lo mismo desde la terminal (`check` termina con código 1 solo si hay `alert`).
+
+**Justificación:** el PSI no necesita etiquetas, así que funciona desde la primera petición; el feedback de #35 llega tarde y es parcial. Es una métrica estándar, comparable entre variables y sin dependencias nuevas. Los umbrales son los habituales y se comprobaron con datos reales: sin drift, 200 de 200 ventanas salieron `ok` (PSI máximo típico 0,04, percentil 95 de 0,062); con la elevación desplazada +100 m se detecta el 100 % de las ventanas, con +150 m casi todas llegan a `alert`, y con +50 m solo el 8 % (es 0,18 desviaciones estándar); cambiar el tipo de suelo en el 30 % de las filas da PSI 0,86. La referencia completa contra sí misma da 0,0003.
+
+**Limitación:** solo detecta cambios en las entradas, no cambios en la relación entre entradas y clase (concept drift). La referencia no se rehace sola al reenviar un modelo reentrenado (#36): hay que volver a ejecutar `build`. Las alertas van al log y al webhook, no se guarda un historial en la base de datos. El PSI depende de cómo se agrupan los valores y los umbrales son una convención. 🟡 en este punto: se probó con desplazamientos simulados y con peticiones idénticas, no con tráfico real, y el webhook se probó contra un receptor local, no contra Slack ni Discord.
+
+**Explicación sencilla:** es como comparar la foto de los clientes de hoy con la foto de los clientes con los que se aprendió. Si los clientes nuevos son muy distintos de los que el modelo conoció, suena una alarma, aunque todavía no sepamos si el modelo se equivoca más.
+
+**Evidencia:** issue #53 · `src/drift_monitoring.py`, `src/database.py` (`prediction_inputs`), `app/api.py`, `app/schemas.py` · `docs/DRIFT_MONITORING.md` · `specs/feature-53-m8-data-drift-monitoring-with-alerts.md` · `tests/test_drift_monitoring.py` (75 tests pasan en total). Probado en Windows con Docker Desktop y MySQL: con ventana y chequeo de 200, 400 peticiones idénticas dejaron `/drift` en `alert` (12 variables, PSI máximo 8,46), el chequeo automático escribió `Data drift ALERT` en el log de la API (ids 401-600), el webhook llegó a un receptor local con el JSON completo y `check` terminó con código 1.
+
+**Responsable:** @Leandroletoile.
+
+---
+
+#### D10.12 · Test end-to-end de la API con datos nuevos  (✅)
+
+**Decisión:** añadir un test automático (`tests/test_end_to_end.py`) que recorre la API real de punta a punta —validación de FastAPI, capa de serving, modelo y respuesta— con datos que el modelo nunca vio.
+
+**Justificación:** es la forma reproducible de comprobar que la app/API predice bien con datos nuevos. Usa el `TestClient` de FastAPI (sin levantar Docker a mano) y corre en la CI (#41). Tiene dos capas:
+- **Sintética (siempre corre):** entrena el pipeline con el 70 % de los datos sintéticos del `conftest` y predice el 30 % restante. Resultado observado: **91 % de acierto en 126 filas**.
+- **Real (gateada):** con `models/model.joblib` y `data/raw/covtype.data`, predice 300 filas del **test set real** (nunca visto). Resultado observado: **97 % en 300 filas** (el modelo tiene ~95 % de acierto offline).
+- La base de datos se aísla en un SQLite temporal, así que el test no toca la BD real.
+
+**Limitación:** la capa real no corre en la CI (allí no hay modelo exportado), así que en CI solo se ejecuta la sintética. La muestra real son 300 filas del test split, no el conjunto completo. La UI de Streamlit no se prueba (solo la API). Y usar el test split es una comprobación puntual que no influye en ninguna decisión: el test se sigue usando una sola vez, como pide el checklist (punto 4).
+
+**Explicación sencilla:** es como hacerle al modelo un examen final de verdad: le damos parcelas nuevas (que nunca vio) por la misma "ventanilla" que usa la app, y comprobamos si acierta la especie. Lo hacemos automático para que la CI lo repita en cada cambio.
+
+**Evidencia:** issue #42 · `tests/test_end_to_end.py` · `requirements.txt` (`httpx==0.27.2`) · `docs/TESTING.md`.
+
+**Responsable:** @nagicome03.
 
 ---
 

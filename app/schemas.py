@@ -162,3 +162,56 @@ class ABResultsResponse(BaseModel):
     z: float | None = Field(default=None, description="z statistic (positive when B is better).")
     p_value: float | None = Field(default=None, description="Two-sided p-value of the z-test.")
     rule: ABRule = Field(..., description="Decision rule applied.")
+
+
+class DriftFeature(BaseModel):
+    """Drift of one monitored input in a window (ticket #53)."""
+
+    psi: float = Field(..., description="Population Stability Index against the training data.")
+    level: str = Field(..., description="ok, warning or alert.")
+
+
+class DriftAlert(BaseModel):
+    """A feature whose PSI reached the warning or alert threshold."""
+
+    feature: str = Field(..., description="Name of the input.")
+    psi: float = Field(..., description="Its PSI.")
+    level: str = Field(..., description="warning or alert.")
+
+
+class DriftWindow(BaseModel):
+    """Summary of one window of consecutive predictions."""
+
+    status: str = Field(..., description="ok, warning, alert or insufficient_data.")
+    rows: int = Field(..., description="Predictions in the window.")
+    max_psi: float | None = Field(default=None, description="Highest PSI of the window.")
+    max_feature: str | None = Field(default=None, description="Input with the highest PSI.")
+    first_id: int = Field(..., description="Id of the first prediction of the window.")
+    last_id: int = Field(..., description="Id of the last prediction of the window.")
+    start_utc: str = Field(..., description="Timestamp of the first prediction.")
+    end_utc: str = Field(..., description="Timestamp of the last prediction.")
+
+
+class DriftLatest(DriftWindow):
+    """The latest window with the PSI of every input."""
+
+    features: dict[str, DriftFeature] = Field(..., description="PSI and level of each monitored input.")
+    alerts: list[DriftAlert] = Field(..., description="Inputs at warning or alert, highest PSI first.")
+
+
+class DriftReference(BaseModel):
+    """Training profile the live inputs are compared with."""
+
+    n_rows: int = Field(..., description="Training rows the profile was built from.")
+    created_at_utc: str = Field(..., description="When the profile was built.")
+
+
+class DriftResponse(BaseModel):
+    """Data drift of the inputs received by the API (ticket #53)."""
+
+    status: str = Field(..., description="Status of the latest window.")
+    window_size: int = Field(..., description="Predictions per window.")
+    thresholds: dict[str, float] = Field(..., description="PSI thresholds and minimum rows per window.")
+    reference: DriftReference = Field(..., description="Training profile used as reference.")
+    latest: DriftLatest | None = Field(default=None, description="Latest window, null if there are no predictions.")
+    history: list[DriftWindow] = Field(..., description="Previous windows, oldest first.")

@@ -4,10 +4,14 @@
 
 ## Strategy
 
-- Baseline + cross-validation protocol (StratifiedKFold)
+- Baseline + cross-validation protocol (`StratifiedKFold`, macro F1)
 - Simple model (Logistic Regression)
 - Ensemble models (Random Forest, XGBoost, LightGBM)
-- Hyperparameter optimization (GridSearchCV / RandomizedSearch / Optuna)
+- Neural network (MLP)
+- Hyperparameter optimization (`RandomizedSearchCV`)
+- Final metrics on the validation and test partitions
+- Error analysis
+- Model interpretability (SHAP)
 
 ## Baseline & evaluation protocol
 
@@ -147,8 +151,9 @@ out-of-fold predictions.
   train.
 
 Before Random Forest is carried to deployment, two things still need measuring:
-its overfitting gap (#28) — the forest runs without `max_depth`, so the < 5%
-criterion may not hold as is — and the size of the serialized model
+its overfitting gap (#28 — resolved: accuracy gap +4.80 points, below the 5 %
+gate) — the forest runs without `max_depth`, so the < 5 % criterion may not
+hold as is — and the size of the serialized model
 (`.joblib`), which the API loads at start-up and Docker packages (#34). Tuning
 (#29) should also try the eight selected features of #18 on Random Forest; they
 lifted XGBoost in validation but have not been tested on the forest.
@@ -341,6 +346,56 @@ location features matter more to the model's decisions than their low MDI
 scores suggest, while `Elevation` and the distance features are confirmed as the
 dominant drivers of the cover-type prediction.
 
+## Ensemble models: XGBoost / LightGBM
+
+Issue #22. Reproduce the canonical-split numbers with:
+`python src/model_comparison.py XGBoost LightGBM "DummyClassifier (most_frequent)" "DummyClassifier (stratified)"`.
+(`src/gradient_boosting.py` reproduces the original #22 run, which used its own
+70/30 partition.)
+
+- **Models:** `XGBClassifier(random_state=42, n_jobs=-1)` and
+  `LGBMClassifier(random_state=42, n_jobs=-1, verbosity=-1)` with default
+  hyperparameters. Two gradient-boosting ensembles, to set against the bagging
+  Random Forest (#21).
+- **No scaling / no preprocessor:** a gradient-boosted tree splits on thresholds,
+  so it trains on the raw (cleaned) `FEATURES`; the CV routine refits it on each
+  training fold, so there is no leakage.
+- **Labels:** XGBoost and LightGBM require 0-indexed labels, so the target is
+  encoded (Cover_Type 1-7 -> 0-6) and decoded back before the metrics; the metric
+  scale stays Cover_Type, so the numbers are comparable with the other models.
+- **Data:** the train set of the canonical split (`split_train_val_test`, #16),
+  406,708 rows. The original #22 run used its own 70/30 partition; the numbers
+  below are the canonical ones re-run in the comparison (#23). Validation and
+  test are not used.
+- **Default hyperparameters.** Tuning belongs to #29 and class weights to #17;
+  this issue records the untuned reference.
+
+### Cross-validation scores (5 folds, canonical split)
+
+| Model | Accuracy | Precision (macro) | Recall (macro) | F1 (macro) |
+|---|---|---|---|---|
+| XGBoost | 0.8693 | 0.8833 | 0.8288 | 0.8514 ± 0.0038 |
+| LightGBM | 0.8561 | 0.8504 | 0.8122 | 0.8261 ± 0.0082 |
+
+### F1 per class (out-of-fold predictions on the train set)
+
+| `Cover_Type` | Name | XGBoost | LightGBM |
+|---|---|---|---|
+| 1 | Spruce/Fir | 0.8508 | 0.8343 |
+| 2 | Lodgepole Pine | 0.8816 | 0.8705 |
+| 3 | Ponderosa Pine | 0.9046 | 0.8924 |
+| 4 | Cottonwood/Willow | 0.8728 | 0.7817 |
+| 5 | Aspen | 0.6968 | 0.7109 |
+| 6 | Douglas-fir | 0.8270 | 0.8066 |
+| 7 | Krummholz | 0.9266 | 0.9055 |
+
+XGBoost is the stronger of the two: better macro F1 (0.8514 vs 0.8261) and a
+better F1 in six of the seven classes (LightGBM is slightly ahead only on Aspen,
+0.7109 vs 0.6968). Both trail the Random Forest (0.9124) and the MLP (0.8557) on
+macro F1, but XGBoost is the most stable gradient-boosted model (std 0.0038) and
+the best at the rarest class, Cottonwood/Willow (0.8728). That is why XGBoost is
+the shortlist's secondary model (#23) and is later tuned (#29).
+
 ## Hyperparameter optimization
 
 Issue #29. Reproduce with: `python src/hyperparameter_optimization.py`
@@ -422,7 +477,8 @@ Issue #25. Reproduce with: `python src/final_metrics.py`
 
 - **Train vs validation accuracy gap (`overfitting_gap`):**
   `1.0000 - 0.9520 = +0.0480` (`+4.80` percentage points, below the 5% quality
-  gate; formal verification and any regularization belong to #28).
+  gate). ✅ **Verified in #28:** the requirement is met, so no regularization,
+  simpler model or extra data is needed.
 - **Validation vs test consistency:** test accuracy (`0.9510`) and test macro F1
   (`0.9199`) are within 0.10 and 0.13 percentage points of validation
   (`0.9520` and `0.9186`), which is consistent with the model generalizing to
@@ -584,7 +640,8 @@ high-confidence errors remains — e.g. Krummholz → Spruce/Fir and Lodgepole P
    uncertainty where the model is in fact unsure, at no modelling cost.
 
 These are diagnostic recommendations; acting on them belongs to #29 (tuning),
-#18 (feature engineering) and the app issues, not to this ticket.
+#18 (feature engineering) and the app issues, not to this ticket. Since then, #29
+tuned the two shortlisted models and #33 added the confidence display.
 
 ## Model interpretability (SHAP)
 
