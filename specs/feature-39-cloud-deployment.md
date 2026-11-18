@@ -40,7 +40,7 @@ deployment procedure documented in `docs/APP.md`.
 | File | Change |
 |---|---|
 | `render.yaml` | `plan: free`; `MODEL_URL`, `MODEL_METADATA_URL`, `MODEL_SHA256` of release `model-b-v1`; `AB_TRAFFIC_B=0`; `OMP_NUM_THREADS=1`; `API_STARTUP_TIMEOUT=300`; `branch: feature/39-cloud-deployment` (temporary). |
-| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; docstring targets Render. |
+| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; `--check` waits up to 60 s (was 25 s) for its test servers; docstring targets Render. |
 | `app/main.py` | Footer reads the model name from `model_metadata.json` next to `MODEL_PATH`; *Aspen* example replaced; comment on the examples updated. |
 | `docs/APP.md` | `## Deployment`: provider and model comparison, model origin, architecture, free-plan limitations, variables, Render steps, verification. |
 
@@ -90,9 +90,9 @@ Boundary notes:
 
 - [x] Choose provider (Render/Vercel/AWS) — Render free, justified above
 - [x] Prepare deployment config (`render.yaml`)
-- [ ] Deploy and verify public URL
+- [x] Deploy and verify public URL — https://multiclass-covertype-app.onrender.com
 - [x] Document deployment steps
-- [ ] App accessible via a public URL
+- [x] App accessible via a public URL
 - [x] `python scripts/start_cloud.py --check` verifies model availability, `MODEL_URL` download, database initialization, FastAPI (`/health`, `/predict`, `/feedback`, `/metrics`) and Streamlit (`/_stcore/health`) end-to-end and exits 0 (added)
 - [x] The container fits in 512 MB with the real model B (added)
 
@@ -135,6 +135,26 @@ docker run --memory=512m --memory-swap=512m --cpus=0.1 -p 10000:10000 -e PORT=10
 - With the previous launcher (provisioning in-process) the same run was
   OOM-killed while FastAPI loaded the model.
 
-Not verified: Render's own build and deploy, the public URL, the real wake-up
-time on Render (the local cold start at 0.1 CPU took ~5 min, longer than the
-~1 min Render announces), and an interactive browser session.
+After merging `develop` with #53 (2026-11-18): `/health` also reports
+`drift.enabled: false`; `docker stats` **292 MiB** ready, **294 MiB** after
+predicting, no OOM; direct `/predict` 4.9 s first call, 0.3 s next ones. The
+first `AppTest` prediction exceeded the UI's 15 s timeout (the API still
+stored it), most likely because the test process shared the 0.1 CPU; the
+second returned Ponderosa Pine 47 %. Cold-start time not measured (the local
+Docker engine stopped responding during the run).
+
+Tests and self-check after merging `develop` with #42 and #53
+(2026-11-18, `docker compose` stopped, one run at a time): `--check` passes
+all six steps; `pytest` 77 passed with
+`--deselect tests/test_end_to_end.py::test_predict_real_test_set`, and that
+test passes when run alone (155 s), so 78/78. In a single full run the Docker
+VM (~3.7 GB) runs out of memory at that test, because it loads the Random
+Forest and the whole dataset after the earlier tests; it behaves the same on
+`origin/develop` (passes alone in 162 s).
+
+On Render (deployed from this branch with `render.yaml`):
+https://multiclass-covertype-app.onrender.com — the *Aspen* example predicts
+Aspen (62.1 %) and the footer reads *XGBoost optimizado (v0.2.0)*.
+
+Not verified: the real cold-start / wake-up time on Render (the local cold
+start at 0.1 CPU took ~5 min, longer than the ~1 min Render announces).

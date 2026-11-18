@@ -467,7 +467,8 @@ block startup. The frontend reaches the backend at `http://api:8000`
 ## Deployment
 
 Issue #39. The application is deployed to **Render** (free plan, Docker web
-service) from the Blueprint [render.yaml](../render.yaml). It serves the
+service) from the Blueprint [render.yaml](../render.yaml) and is public at
+<https://multiclass-covertype-app.onrender.com>. It serves the
 **tuned XGBoost of #52 (model B)** as its only model. Verify the cloud
 entrypoint, model provisioning (including the `MODEL_URL` download path),
 database initialization, FastAPI endpoints and Streamlit readiness from the
@@ -553,8 +554,10 @@ on Render, so the A/B test of #52 is off (`/health` reports
 - **The SQLite database is lost on every restart, redeploy or sleep.** The
   filesystem is ephemeral, so predictions, feedback and `/metrics` start from
   zero. Point `DATABASE_URL` to an external MySQL 8.0 server to persist them.
-- **0.1 CPU.** Predictions are slower than locally; `OMP_NUM_THREADS=1` keeps
-  XGBoost from starting more threads than the CPU share can run.
+- **0.1 CPU.** Predictions are slower than locally: in the simulation the
+  first `POST /predict` after startup took ~5 s and the next ones ~0.3 s. The
+  Streamlit UI waits 15 s for the API. `OMP_NUM_THREADS=1` keeps XGBoost from
+  starting more threads than the CPU share can run.
 
 ### Configuration and environment variables
 
@@ -638,8 +641,21 @@ the release:
 - Before provisioning moved to a child process, the same run was killed by the
   OOM killer while FastAPI loaded the model (the launcher held ~230 MiB).
 
-Not verified locally: Render's own build, its real CPU share and wake-up time,
-and a browser session against the public URL.
+Repeated on 2026-11-18 after merging `develop` with #53 (drift monitoring):
+same logs; `GET /health` also reports `drift.enabled: false` (no reference
+file on Render); `docker stats` **292 MiB** when ready and **294 MiB** after
+the predictions, no OOM kill; direct `POST /predict` inside the container
+4.9 s for the first call, then 0.3 s. In that run the first prediction through
+`AppTest` exceeded the UI's 15 s timeout (the API still stored it), most likely
+because the test process shared the 0.1 CPU with the services; the second one
+returned Ponderosa Pine 47 %. The cold-start time was not measured because the
+local Docker engine stopped responding during the run.
+
+On Render, the public URL <https://multiclass-covertype-app.onrender.com>
+was checked by hand: the *Aspen* example predicts Aspen (62.1 %) and the
+footer reads *XGBoost optimizado (v0.2.0)*.
+
+Not verified: the real cold-start / wake-up time on Render.
 
 ## Usage
 
