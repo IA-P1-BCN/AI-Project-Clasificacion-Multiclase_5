@@ -40,7 +40,9 @@ deployment procedure documented in `docs/APP.md`.
 | File | Change |
 |---|---|
 | `render.yaml` | `plan: free`; `MODEL_URL`, `MODEL_METADATA_URL`, `MODEL_SHA256` of release `model-b-v1`; `AB_TRAFFIC_B=0`; `OMP_NUM_THREADS=1`; `API_STARTUP_TIMEOUT=300`; `branch: feature/39-cloud-deployment` (temporary). |
-| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; `--check` waits up to 60 s (was 25 s) for its test servers; docstring targets Render. |
+| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; `--check` waits up to 60 s (was 25 s) for its test servers; docstring targets Render. After the review of PR #116: no model without `MODEL_URL` is an error unless `ALLOW_BOOTSTRAP_MODEL=1`; `MODEL_SHA256` required with `MODEL_URL` (`require_model_sha256`); `supervise` watches FastAPI and Streamlit and exits non-zero if either stops; `--check` step 0 checks both configuration errors. |
+| `tests/test_start_cloud.py` | New. Unit tests without network: `sha256_of`, `download_file` (right and wrong SHA-256 with `file://` URLs), `wait_for_url` (process exits first, timeout), `supervise`, and the two configuration rules. |
+| `docs/TESTING.md` | New test file in the coverage table; note on running the real end-to-end test of #42 on its own on machines with little RAM. |
 | `app/main.py` | Footer reads the model name from `model_metadata.json` next to `MODEL_PATH`; *Aspen* example replaced; comment on the examples updated. |
 | `docs/APP.md` | `## Deployment`: provider and model comparison, model origin, architecture, free-plan limitations, variables, Render steps, verification. |
 
@@ -65,8 +67,17 @@ Decisions and reasons:
   library, leaves it at ~25 MiB.
 - **Longer startup timeout.** With 0.1 CPU, FastAPI took ~1 min to import and
   load the model, more than the previous fixed 30 s.
-- **No silent fallback when `MODEL_URL` is set.** A misconfigured deployment
-  must fail instead of serving the synthetic bootstrap model.
+- **No silent fallback at all.** A misconfigured deployment must fail instead
+  of serving the synthetic bootstrap model, whose footer would wrongly claim
+  it was trained on the Covertype data. The fallback stays only behind
+  `ALLOW_BOOTSTRAP_MODEL=1` for local development (review of PR #116).
+- **`MODEL_SHA256` mandatory with `MODEL_URL`.** `load_model` unpickles the
+  file, so an unchecked download could run arbitrary code (review of PR #116).
+- **The launcher supervises both services.** Previously it only waited on
+  Streamlit, so a dead API kept `/_stcore/health` green while every prediction
+  failed. Now any exit stops the container with a non-zero code and Render
+  restarts it (review of PR #116). The loop uses the standard library and
+  polls once per second, so the measured memory does not change.
 
 Boundary notes:
 
@@ -80,8 +91,10 @@ Boundary notes:
   models classify as Aspen (RF 0.72, XGBoost 0.62). The other six examples
   were unchanged and predict their class with both models.
 - `render.yaml` points to `branch: feature/39-cloud-deployment` only to test
-  on Render before the PR. **After the merge it must go back to
-  `branch: develop`.**
+  on Render before the PR. Which branch Render follows after the merge
+  (`develop`, `main` or `autoDeploy: false`) is a **team decision** raised in
+  the review of PR #116; it must be changed before the feature branch is
+  deleted.
 - Removed with the owner's approval: `deploy/huggingface/` (abandoned
   hosting plan) and, outside Git, the abandoned "lite model" files
   (`src/lite_model.py`, untracked; `models/lite_candidates/`, git-ignored).
@@ -155,6 +168,15 @@ Forest and the whole dataset after the earlier tests; it behaves the same on
 On Render (deployed from this branch with `render.yaml`):
 https://multiclass-covertype-app.onrender.com — the *Aspen* example predicts
 Aspen (62.1 %) and the footer reads *XGBoost optimizado (v0.2.0)*.
+
+After the review of PR #116 (2026-11-18, image of the Compose `api`
+service): `tests/test_start_cloud.py` 10 passed; `--check` passes, including
+the new step 0. Launcher without a model and without `MODEL_URL`: exits 1 with
+the `ALLOW_BOOTSTRAP_MODEL` hint, services not started. `MODEL_URL` without
+`MODEL_SHA256`: exits 1 before downloading. With `ALLOW_BOOTSTRAP_MODEL=1`,
+killing the FastAPI process with SIGKILL makes the launcher log
+`FastAPI exited with code -9`, stop Streamlit and exit with code 247. The
+512 MB simulation was not repeated (supervision does not change memory).
 
 Not verified: the real cold-start / wake-up time on Render (the local cold
 start at 0.1 CPU took ~5 min, longer than the ~1 min Render announces).

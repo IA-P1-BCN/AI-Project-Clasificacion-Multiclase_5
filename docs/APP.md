@@ -527,14 +527,23 @@ One container runs everything (`SERVICE_ROLE=all`), built from the project
    file and renamed only if its SHA-256 matches `MODEL_SHA256`; then it is
    validated with `app.serving.load_model`. `MODEL_METADATA_URL` is saved as
    `model_metadata.json` next to it (the Streamlit footer reads the model name
-   from it). Any failure stops the container: there is no silent fallback when
-   `MODEL_URL` is set. Then the database is initialized
+   from it). `MODEL_SHA256` is required whenever `MODEL_URL` is set: without it
+   the container fails before downloading, because the file is unpickled.
+   Without a model at `MODEL_PATH` and without `MODEL_URL` the container also
+   fails with an explicit error; the synthetic bootstrap model is only served
+   with `ALLOW_BOOTSTRAP_MODEL=1` (local development, never on Render). Any
+   failure stops the container: there is no silent fallback. Then the database
+   is initialized
    (`src/database.py::init_db`). The child process exits before the services
    start, so its memory (~230 MiB with the model loaded) is released.
 2. **FastAPI** (`uvicorn app.api:app`) starts on `127.0.0.1:8000`. The launcher
    waits for `GET /health` up to `API_STARTUP_TIMEOUT` seconds and fails at
    once if the API process dies.
 3. **Streamlit** runs on `0.0.0.0:$PORT` (Render injects `PORT`).
+4. **Supervision.** The launcher watches both processes. If either exits (for
+   example the API is OOM-killed), it stops the other and exits with an error
+   code, so Render restarts the container instead of keeping a green
+   `/_stcore/health` with a dead API.
 
 The launcher itself only uses the standard library (~25 MiB). Without the
 child process it kept the ML imports and a loaded copy of the model (~230 MiB)
@@ -573,8 +582,9 @@ defaults). [render.yaml](../render.yaml) sets the cloud values:
 | `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | `http://127.0.0.1:8000` | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
 | `API_STARTUP_TIMEOUT` | `300` | `300` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Seconds to wait for FastAPI `/health` before failing. |
 | `MODEL_PATH` | `models/model.joblib` | `/app/models/model.joblib` | [app/serving.py](../app/serving.py), [app/main.py](../app/main.py) | Path of the served pipeline; its `model_metadata.json` sibling names the model in the footer. |
-| `MODEL_URL` | unset | release `model-b-v1`, `model_b.joblib` | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the model, downloaded when `MODEL_PATH` is missing. |
-| `MODEL_SHA256` | unset | `d679fe0e…0be604` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in the metadata). |
+| `MODEL_URL` | unset | release `model-b-v1`, `model_b.joblib` | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the model, downloaded when `MODEL_PATH` is missing. Requires `MODEL_SHA256`. |
+| `MODEL_SHA256` | unset | `d679fe0e…0be604` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in the metadata). **Required** when `MODEL_URL` is set. |
+| `ALLOW_BOOTSTRAP_MODEL` | unset | - (never set it on Render) | [scripts/start_cloud.py](../scripts/start_cloud.py) | `1` lets the launcher fit and serve a synthetic bootstrap model when there is no model and no `MODEL_URL` (local development only; its predictions are not the project model's). Unset: startup fails. |
 | `MODEL_METADATA_URL` | unset | release `model-b-v1`, `model_b_metadata.json` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Metadata saved as `model_metadata.json` next to the model. |
 | `AB_TRAFFIC_B` | `0` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
 | `MODEL_B_PATH` | `models/model_b.joblib` | - (file absent) | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional. |
@@ -616,8 +626,8 @@ defaults). [render.yaml](../render.yaml) sets the cloud values:
 4. Open the public URL `https://<service-name>.onrender.com`, load an example
    and press *Predecir*. The footer must read *XGBoost optimizado (v0.2.0)*.
 5. `autoDeploy: true` redeploys on every push to the branch set in
-   `render.yaml` (`feature/39-cloud-deployment` while testing, `develop`
-   after the merge of #39).
+   `render.yaml` (`feature/39-cloud-deployment` while testing; the branch to
+   follow after the merge of #39 is a team decision, see PR #116).
 
 ### Verification of the Render setup
 
