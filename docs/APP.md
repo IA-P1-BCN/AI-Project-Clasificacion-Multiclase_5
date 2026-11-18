@@ -466,40 +466,207 @@ block startup. The frontend reaches the backend at `http://api:8000`
 
 ## Deployment
 
+Issue #39. The application is deployed to **Render** (free plan, Docker web
+service) from the Blueprint [render.yaml](../render.yaml) and is public at
+<https://multiclass-covertype-app.onrender.com>. It serves the
+**tuned XGBoost of #52 (model B)** as its only model. Verify the cloud
+entrypoint, model provisioning (including the `MODEL_URL` download path),
+database initialization, FastAPI endpoints and Streamlit readiness from the
+project root:
+
+```bash
+docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
+  ai-project-clasificacion-multiclase_5-app python scripts/start_cloud.py --check
+```
+
+### Cloud provider and served model
+
+Render's free plan gives **512 MB of RAM and 0.1 CPU**. The Random Forest of
+the [Model export](#model-export) (#32) needs ~1.17 GiB of RAM once FastAPI and
+Streamlit are running, so it does not fit. Model B (#52) does:
+
+| Model | Validation accuracy | Validation macro F1 | Size on disk | RAM of the running container | Served on Render |
+|---|---|---|---|---|---|
+| Random Forest, untuned (#32, `model.joblib`) | 0.9520 | 0.9186 | 136.3 MB | ~1.17 GiB | No |
+| **XGBoost, tuned (#52, `model_b.joblib`)** | **0.9471** | **0.9244** | 19.6 MB | **~307 MiB** | **Yes** |
+
+Model B loses 0.5 points of accuracy and gains 0.6 points of macro F1 (better
+on the minority classes). Metrics are on the validation split
+(`model_metadata.json` of each model); RAM measured with `docker stats` (see
+[Verification of the Render setup](#verification-of-the-render-setup)).
+
+Discarded: **Streamlit Community Cloud** (no FastAPI process, ~1 GB RAM, 100 MB GitHub
+file limit) and **Vercel** (serverless, no long-running Streamlit/WebSocket
+server).
+
+### Where the model comes from
+
+The model is **not** in Git (hard rule #5). It is attached to the GitHub
+release [`model-b-v1`](https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5/releases/tag/model-b-v1):
+
+- `model_b.joblib`, SHA-256 `d679fe0e27d76b565a4375fb58f014f9f30af83c29dd9f7f6af70fb86f0be604`
+- `model_b_metadata.json` (hyperparameters, metrics, label mapping, versions)
+
+Reproduce both files with the raw dataset in place:
+
+```bash
+python src/export_challenger.py
+```
+
+The pickled pipeline wraps the XGBoost in `LabelOffsetClassifier`
+(`src/model_comparison.py`), so `src/` must be importable when it is loaded;
+`app/serving.py` already adds it to `sys.path`.
+
+### Cloud architecture
+
+One container runs everything (`SERVICE_ROLE=all`), built from the project
+[Dockerfile](../Dockerfile) with the command `python scripts/start_cloud.py`:
+
+1. **Provisioning, in a child process (`--provision`).** If `MODEL_PATH` is
+   missing, the model is downloaded from `MODEL_URL`, written to a temporary
+   file and renamed only if its SHA-256 matches `MODEL_SHA256`; then it is
+   validated with `app.serving.load_model`. `MODEL_METADATA_URL` is saved as
+   `model_metadata.json` next to it (the Streamlit footer reads the model name
+   from it). `MODEL_SHA256` is required whenever `MODEL_URL` is set: without it
+   the container fails before downloading, because the file is unpickled.
+   Without a model at `MODEL_PATH` and without `MODEL_URL` the container also
+   fails with an explicit error; the synthetic bootstrap model is only served
+   with `ALLOW_BOOTSTRAP_MODEL=1` (local development, never on Render). Any
+   failure stops the container: there is no silent fallback. Then the database
+   is initialized
+   (`src/database.py::init_db`). The child process exits before the services
+   start, so its memory (~230 MiB with the model loaded) is released.
+2. **FastAPI** (`uvicorn app.api:app`) starts on `127.0.0.1:8000`. The launcher
+   waits for `GET /health` up to `API_STARTUP_TIMEOUT` seconds and fails at
+   once if the API process dies.
+3. **Streamlit** runs on `0.0.0.0:$PORT` (Render injects `PORT`).
+4. **Supervision.** The launcher watches both processes. If either exits (for
+   example the API is OOM-killed), it stops the other and exits with an error
+   code, so Render restarts the container instead of keeping a green
+   `/_stcore/health` with a dead API.
+
+The launcher itself only uses the standard library (~25 MiB). Without the
+child process it kept the ML imports and a loaded copy of the model (~230 MiB)
+next to the API, and the container was killed for exceeding 512 MB.
+
+Only one model is served: `AB_TRAFFIC_B=0` and there is no `MODEL_B_PATH` file
+on Render, so the A/B test of #52 is off (`/health` reports
+`ab_test.enabled: false`).
+
+### Limitations of the free plan
+
+- **Sleeps after 15 minutes without traffic.** The next request wakes it up.
+  Render announces about a minute to spin an instance up, but this container
+  also downloads and loads the model on every start: in the local simulation
+  with 0.1 CPU the full cold start took **~5 minutes** (see below). Measure it
+  on Render.
+- **The SQLite database is lost on every restart, redeploy or sleep.** The
+  filesystem is ephemeral, so predictions, feedback and `/metrics` start from
+  zero. Point `DATABASE_URL` to an external MySQL 8.0 server to persist them.
+- **0.1 CPU.** Predictions are slower than locally: in the simulation the
+  first `POST /predict` after startup took ~5 s and the next ones ~0.3 s. The
+  Streamlit UI waits 15 s for the API. `OMP_NUM_THREADS=1` keeps XGBoost from
+  starting more threads than the CPU share can run.
+
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
 lists the database variables plus `MODEL_PATH` and `API_URL` (the Compose
-defaults); change `MODEL_PATH` only to load a model from a non-default path:
+defaults). [render.yaml](../render.yaml) sets the cloud values:
 
-| Variable | Default | Used by | Description |
-|---|---|---|---|
-| `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
-| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local) | [src/database.py](../src/database.py) | Database connection string (#37). |
-| `MYSQL_DATABASE` | `multiclass` | `db` container | MySQL database created on startup. |
-| `MYSQL_USER` | `app` | `db` container | MySQL application user. |
-| `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
-| `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
-| `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
-| `MODEL_B_PATH` | `models/model_b.joblib` | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional: without the file everything is served by `MODEL_PATH`. |
-| `AB_TRAFFIC_B` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
-| `DRIFT_REFERENCE_PATH` | `models/drift_reference.json` | [src/drift_monitoring.py](../src/drift_monitoring.py) | Reference profile of the training inputs (#53). Without it drift monitoring is off. |
-| `DRIFT_WINDOW` | `500` | [src/drift_monitoring.py](../src/drift_monitoring.py) | Predictions per drift window. |
-| `DRIFT_CHECK_EVERY` | `500` | [app/api.py](../app/api.py) | The API checks the latest window every N predictions. `0` turns the automatic check off. |
-| `DRIFT_WEBHOOK_URL` | empty | [src/drift_monitoring.py](../src/drift_monitoring.py) | Optional webhook (Slack, Discord) that receives a message on a drift warning or alert. |
-| `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
+| Variable | Default | Render value | Used by | Description |
+|---|---|---|---|---|
+| `SERVICE_ROLE` | `all` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
+| `PORT` | `8501` (`8000` when `SERVICE_ROLE=api`) | injected by Render | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port of Streamlit. |
+| `API_PORT` | `8000` | - | [scripts/start_cloud.py](../scripts/start_cloud.py) | Loopback port of FastAPI in `SERVICE_ROLE=all`. |
+| `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | `http://127.0.0.1:8000` | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
+| `API_STARTUP_TIMEOUT` | `300` | `300` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Seconds to wait for FastAPI `/health` before failing. |
+| `MODEL_PATH` | `models/model.joblib` | `/app/models/model.joblib` | [app/serving.py](../app/serving.py), [app/main.py](../app/main.py) | Path of the served pipeline; its `model_metadata.json` sibling names the model in the footer. |
+| `MODEL_URL` | unset | release `model-b-v1`, `model_b.joblib` | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the model, downloaded when `MODEL_PATH` is missing. Requires `MODEL_SHA256`. |
+| `MODEL_SHA256` | unset | `d679fe0e…0be604` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in the metadata). **Required** when `MODEL_URL` is set. |
+| `ALLOW_BOOTSTRAP_MODEL` | unset | - (never set it on Render) | [scripts/start_cloud.py](../scripts/start_cloud.py) | `1` lets the launcher fit and serve a synthetic bootstrap model when there is no model and no `MODEL_URL` (local development only; its predictions are not the project model's). Unset: startup fails. |
+| `MODEL_METADATA_URL` | unset | release `model-b-v1`, `model_b_metadata.json` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Metadata saved as `model_metadata.json` next to the model. |
+| `AB_TRAFFIC_B` | `0` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
+| `MODEL_B_PATH` | `models/model_b.joblib` | - (file absent) | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional. |
+| `OMP_NUM_THREADS` | unset | `1` | XGBoost | OpenMP threads used for prediction. |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local) | `sqlite:////app/data/processed/multiclass.db` | [src/database.py](../src/database.py) | Database connection string (#37). |
+| `MYSQL_DATABASE` | `multiclass` | - | `db` container | MySQL database created on startup. |
+| `MYSQL_USER` | `app` | - | `db` container | MySQL application user. |
+| `MYSQL_PASSWORD` | `app` | - | `db` container | MySQL application password. |
+| `MYSQL_ROOT_PASSWORD` | `root` | - | `db` container | MySQL root password for healthchecks. |
+| `MYSQL_PORT` | `3306` | - | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
+| `DRIFT_REFERENCE_PATH` | `models/drift_reference.json` | - (file absent: monitoring off) | [src/drift_monitoring.py](../src/drift_monitoring.py) | Reference profile of the training inputs (#53). Without it drift monitoring is off. |
+| `DRIFT_WINDOW` | `500` | - | [src/drift_monitoring.py](../src/drift_monitoring.py) | Predictions per drift window. |
+| `DRIFT_CHECK_EVERY` | `500` | - | [app/api.py](../app/api.py) | The API checks the latest window every N predictions. `0` turns the automatic check off. |
+| `DRIFT_WEBHOOK_URL` | empty | - | [src/drift_monitoring.py](../src/drift_monitoring.py) | Optional webhook (Slack, Discord) that receives a message on a drift warning or alert. |
 
 ### Readiness and health checks
 
-`GET /health` on the FastAPI service returns HTTP 200 with:
+- **Streamlit UI health check (`GET /_stcore/health`):** returns `ok` (HTTP 200).
+  It is the `healthCheckPath` of the Render service. Streamlit only starts once
+  the model is provisioned and FastAPI is healthy, so `ok` means the whole
+  stack is ready.
+- **FastAPI health check (`GET /health`):** returns HTTP 200 with `status`
+  (`"ok"`), `model_loaded` (`bool`), `db_connected` (`bool`), `detail`,
+  `db_detail` and `ab_test`. In `SERVICE_ROLE=all` it is only reachable inside
+  the container.
 
-- `status`: `"ok"` when the HTTP process is live.
-- `model_loaded` (`bool`) and `detail` (`str | null`): whether
-  `models/model.joblib` is loaded and matches the 54-feature contract.
-- `db_connected` (`bool`) and `db_detail` (`str | null`): whether the configured
-  database responds.
+### Step-by-step deployment on Render
 
-Cloud deployment to a public URL (Render / Vercel / AWS) is tracked in #39.
+1. Sign in to <https://dashboard.render.com> with an account that has access to
+   the GitHub repository `IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`.
+2. Click **New** → **Blueprint**, select the repository and confirm. Render
+   reads [render.yaml](../render.yaml) and proposes one web service,
+   `multiclass-covertype-app` (Docker, plan *Free*). All variables come from the
+   file; nothing has to be typed.
+3. Click **Deploy Blueprint**. The logs must show
+   `[start_cloud] model status: downloaded at /app/models/model.joblib`,
+   `[start_cloud] database initialized.` and
+   `[start_cloud] FastAPI healthy at http://127.0.0.1:8000`.
+4. Open the public URL `https://<service-name>.onrender.com`, load an example
+   and press *Predecir*. The footer must read *XGBoost optimizado (v0.2.0)*.
+5. `autoDeploy: true` redeploys on every push to the branch set in
+   `render.yaml`: `feature/39-cloud-deployment` while testing, then `main`
+   once it contains this code (team decision, PR #116; steps in
+   [the spec of the branch](../specs/feature-39-cloud-deployment.md)).
+
+### Verification of the Render setup
+
+Local simulation of the free plan on 2026-11-18: project image,
+`docker run --memory=512m --memory-swap=512m --cpus=0.1 -e PORT=10000` and the
+environment of [render.yaml](../render.yaml), downloading the real model from
+the release:
+
+- Logs: `model status: downloaded`, `database initialized.`,
+  `FastAPI healthy`; Streamlit `/_stcore/health` = `ok` **301 s** after
+  `docker run` (provisioning ~3.5 min, FastAPI startup ~1 min).
+- `GET /health`: `status: ok`, `model_loaded: true`, `db_connected: true`,
+  `ab_test.enabled: false`.
+- Prediction through Streamlit (`streamlit.testing` `AppTest` inside the
+  container, calling the running API): *Aspen* button → Aspen 62 %,
+  *Ponderosa Pine* button → Ponderosa Pine 47 %, no errors; footer
+  *XGBoost optimizado (v0.2.0)*; 2 rows stored in SQLite.
+- `docker stats`: **305 MiB** when ready, **307 MiB** after the predictions
+  (launcher 25 MiB, FastAPI ~330 MiB RSS, Streamlit ~47 MiB RSS; RSS counts
+  shared pages, so it does not add up to the container total). No OOM kill.
+- Before provisioning moved to a child process, the same run was killed by the
+  OOM killer while FastAPI loaded the model (the launcher held ~230 MiB).
+
+Repeated on 2026-11-18 after merging `develop` with #53 (drift monitoring):
+same logs; `GET /health` also reports `drift.enabled: false` (no reference
+file on Render); `docker stats` **292 MiB** when ready and **294 MiB** after
+the predictions, no OOM kill; direct `POST /predict` inside the container
+4.9 s for the first call, then 0.3 s. In that run the first prediction through
+`AppTest` exceeded the UI's 15 s timeout (the API still stored it), most likely
+because the test process shared the 0.1 CPU with the services; the second one
+returned Ponderosa Pine 47 %. The cold-start time was not measured because the
+local Docker engine stopped responding during the run.
+
+On Render, the public URL <https://multiclass-covertype-app.onrender.com>
+was checked by hand: the *Aspen* example predicts Aspen (62.1 %) and the
+footer reads *XGBoost optimizado (v0.2.0)*.
+
+Not verified: the real cold-start / wake-up time on Render.
 
 ## Usage
 

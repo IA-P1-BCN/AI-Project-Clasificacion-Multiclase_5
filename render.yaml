@@ -1,0 +1,45 @@
+# Render Blueprint for cloud deployment (issue #39). Free plan: 512 MB RAM,
+# 0.1 CPU, sleeps after 15 min idle, ephemeral filesystem.
+# Serves the tuned XGBoost of #52 (model B, GitHub release model-b-v1) as the
+# only model: the Random Forest of #32 needs ~1.17 GiB of RAM and does not fit.
+# The model is downloaded at startup and checked against MODEL_SHA256
+# (scripts/start_cloud.py). Reproduce it with `python src/export_challenger.py`.
+# Deploy from https://dashboard.render.com -> New -> Blueprint -> select this repository.
+services:
+  - type: web
+    name: multiclass-covertype-app
+    runtime: docker
+    plan: free
+    # Temporary: deploy the feature branch to test on Render before the PR.
+    # Switch back to `develop` when #39 is merged.
+    branch: feature/39-cloud-deployment
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python scripts/start_cloud.py
+    # Streamlit answers only after the API is healthy, i.e. once the model is
+    # downloaded and loaded. Render waits for the port to open during a deploy.
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    envVars:
+      - key: SERVICE_ROLE
+        value: all
+      - key: API_URL
+        value: http://127.0.0.1:8000
+      - key: MODEL_PATH
+        value: /app/models/model.joblib
+      - key: MODEL_URL
+        value: https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5/releases/download/model-b-v1/model_b.joblib
+      - key: MODEL_METADATA_URL
+        value: https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5/releases/download/model-b-v1/model_b_metadata.json
+      - key: MODEL_SHA256
+        value: d679fe0e27d76b565a4375fb58f014f9f30af83c29dd9f7f6af70fb86f0be604
+      # A single model is served on Render: no A/B split (#52).
+      - key: AB_TRAFFIC_B
+        value: "0"
+      # 0.1 CPU: one OpenMP thread for XGBoost avoids oversubscription.
+      - key: OMP_NUM_THREADS
+        value: "1"
+      # Seconds start_cloud.py waits for FastAPI /health before giving up.
+      - key: API_STARTUP_TIMEOUT
+        value: "300"
+      - key: DATABASE_URL
+        value: sqlite:////app/data/processed/multiclass.db

@@ -27,6 +27,7 @@ docker compose run --rm --no-deps app python -m pytest
 | `tests/test_ab_testing.py` | #52 | Variant assignment and the A/B winner rule. |
 | `tests/test_drift_monitoring.py` | #53 | PSI, windows and the drift alert rules. |
 | `tests/test_end_to_end.py` | #42 | The real `POST /predict` endpoint predicts unseen data correctly through FastAPI's `TestClient`. |
+| `tests/test_start_cloud.py` | #39 | Cloud entrypoint without network: checksum and atomic `file://` download, fail-fast waits, process supervision, and the model configuration rules (no model without `MODEL_URL`, `MODEL_SHA256` required). |
 
 ## End-to-end test (#42)
 
@@ -48,3 +49,18 @@ file, so the test never touches the real one.
 > local Python 3.13 + sklearn 1.9.1) does not load, and the test **skips**
 > instead of failing. Run it in Docker, or deselect it locally:
 > `pytest --deselect tests/test_end_to_end.py::test_predict_real_test_set`.
+
+> **Memory on machines with little RAM.** The real layer loads the Random
+> Forest (~1.2 GiB in memory) and the whole raw dataset. In a single full run
+> inside a Docker VM with ~3.7 GB, the earlier tests keep memory and the
+> process is killed (`Killed` / exit 137) or pandas fails with
+> `OSError: [Errno 12] Cannot allocate memory` at this test. It passes when
+> run on its own (~160 s). On such machines stop the Compose stack first
+> (`docker compose stop`), run the suite without it, then run it alone:
+>
+> ```bash
+> pytest --deselect tests/test_end_to_end.py::test_predict_real_test_set
+> pytest tests/test_end_to_end.py::test_predict_real_test_set
+> ```
+>
+> The CI (#41) runs the whole suite in one go.

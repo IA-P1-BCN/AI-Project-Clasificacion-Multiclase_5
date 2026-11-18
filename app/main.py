@@ -6,6 +6,7 @@ photo, botanical facts, confidence and per-class probabilities. UI strings are
 in Spanish; the species names come from `src/target_encoding.py` (single source
 of truth).
 """
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,7 +24,8 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 # One correctly-classified cell per cover type, spread across the confidence
 # spectrum so the demo shows the model's full behaviour: clear cells (high
 # confidence) and borderline cells (low confidence). All rows are real training
-# cells that the untuned Random Forest of the export (#32) predicts correctly.
+# cells that both the untuned Random Forest of the export (#32) and the tuned
+# XGBoost served in the cloud (#52, #39) predict correctly.
 EXAMPLES = {
     1: {
         "Elevation": 3153, "Aspect": 138, "Slope": 7,
@@ -62,13 +64,13 @@ EXAMPLES = {
         "Wilderness_Area": 4, "Soil_Type": 1,
     },
     5: {
-        "Elevation": 2919, "Aspect": 81, "Slope": 15,
-        "Horizontal_Distance_To_Hydrology": 150,
-        "Vertical_Distance_To_Hydrology": 26,
-        "Horizontal_Distance_To_Roadways": 4696,
-        "Hillshade_9am": 239, "Hillshade_Noon": 212, "Hillshade_3pm": 99,
-        "Horizontal_Distance_To_Fire_Points": 1829,
-        "Wilderness_Area": 1, "Soil_Type": 29,
+        "Elevation": 2802, "Aspect": 50, "Slope": 13,
+        "Horizontal_Distance_To_Hydrology": 90,
+        "Vertical_Distance_To_Hydrology": 17,
+        "Horizontal_Distance_To_Roadways": 2037,
+        "Hillshade_9am": 225, "Hillshade_Noon": 212, "Hillshade_3pm": 119,
+        "Horizontal_Distance_To_Fire_Points": 2024,
+        "Wilderness_Area": 3, "Soil_Type": 33,
     },
     6: {
         "Elevation": 2576, "Aspect": 322, "Slope": 12,
@@ -184,6 +186,27 @@ NUMERIC_FIELDS = [
     ("Hillshade_3pm", "Sombra a las 15:00 (índice 0–255)", 0, 255),
     ("Horizontal_Distance_To_Fire_Points", "Distancia a puntos de incendio (m)", 0, 10000),
 ]
+
+# Footer label of the served model (#39), read from the metadata next to MODEL_PATH.
+MODEL_METADATA_PATH = Path(
+    os.getenv("MODEL_PATH", ROOT / "models" / "model.joblib")
+).with_name("model_metadata.json")
+ESTIMATOR_LABELS = {"RandomForestClassifier": "Random Forest", "XGBClassifier": "XGBoost"}
+
+
+def _model_label() -> str:
+    """Human-readable name of the served model, e.g. 'XGBoost (v0.2.0)'."""
+    try:
+        metadata = json.loads(MODEL_METADATA_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "modelo de clasificación"
+    estimator = metadata.get("estimator", "")
+    label = ESTIMATOR_LABELS.get(estimator, estimator or "modelo de clasificación")
+    if metadata.get("tuned"):
+        label += " optimizado"
+    version = metadata.get("model_version")
+    return f"{label} (v{version})" if version else label
+
 
 # Initial form state: a representative cell of the most frequent class (Lodgepole Pine).
 DEFAULT_EXAMPLE = 2
@@ -383,6 +406,6 @@ with st.expander("📋 Características de la celda (opcional)"):
 
 st.divider()
 st.caption(
-    "Modelo: Random Forest entrenado con el dataset *Forest Cover Type* (UCI). "
+    f"Modelo: {_model_label()} entrenado con el dataset *Forest Cover Type* (UCI). "
     "Cada predicción se guarda automáticamente en la base de datos (#37)."
 )
