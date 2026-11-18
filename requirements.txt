@@ -31,3 +31,4 @@ python-dotenv==1.0.1
 
 # Tests (#40). Test-only; kept here because CI installs this single file.
 pytest==8.3.3
+httpx==0.27.2  # FastAPI TestClient (tests/test_end_to_end.py); starlette 0.38 needs httpx < 0.28

@@ -54,7 +54,7 @@
 | 7 | Ajuste de hiperparámetros | ✅ Random Forest y XGBoost afinados con RandomizedSearchCV (#29) |
 | 8 | Evaluación final | ✅ Métricas finales y matriz de confusión (#25) y overfitting < 5 % verificado (#28) |
 | 9 | Análisis de errores e interpretación | ✅ Errores (#27) e interpretación con SHAP aproximado (#30) documentados |
-| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38) y guías de ejecución (#46, #47); falta el monitoreo de drift |
+| 10 | Despliegue y monitoreo | 🟡 API (#34) con base de datos (#37), feedback y métricas (#35), pipeline exportado (#32), CI en verde (#41), orquestación con Compose (#38), guías de ejecución (#46, #47), monitoreo de drift (#53) y test end-to-end (#42); falta el despliegue en la nube (#39) |
 
 ---
 
@@ -1144,6 +1144,25 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 **Evidencia:** issue #53 · `src/drift_monitoring.py`, `src/database.py` (`prediction_inputs`), `app/api.py`, `app/schemas.py` · `docs/DRIFT_MONITORING.md` · `specs/feature-53-m8-data-drift-monitoring-with-alerts.md` · `tests/test_drift_monitoring.py` (75 tests pasan en total). Probado en Windows con Docker Desktop y MySQL: con ventana y chequeo de 200, 400 peticiones idénticas dejaron `/drift` en `alert` (12 variables, PSI máximo 8,46), el chequeo automático escribió `Data drift ALERT` en el log de la API (ids 401-600), el webhook llegó a un receptor local con el JSON completo y `check` terminó con código 1.
 
 **Responsable:** @Leandroletoile.
+
+---
+
+#### D10.12 · Test end-to-end de la API con datos nuevos  (✅)
+
+**Decisión:** añadir un test automático (`tests/test_end_to_end.py`) que recorre la API real de punta a punta —validación de FastAPI, capa de serving, modelo y respuesta— con datos que el modelo nunca vio.
+
+**Justificación:** es la forma reproducible de comprobar que la app/API predice bien con datos nuevos. Usa el `TestClient` de FastAPI (sin levantar Docker a mano) y corre en la CI (#41). Tiene dos capas:
+- **Sintética (siempre corre):** entrena el pipeline con el 70 % de los datos sintéticos del `conftest` y predice el 30 % restante. Resultado observado: **91 % de acierto en 126 filas**.
+- **Real (gateada):** con `models/model.joblib` y `data/raw/covtype.data`, predice 300 filas del **test set real** (nunca visto). Resultado observado: **97 % en 300 filas** (el modelo tiene ~95 % de acierto offline).
+- La base de datos se aísla en un SQLite temporal, así que el test no toca la BD real.
+
+**Limitación:** la capa real no corre en la CI (allí no hay modelo exportado), así que en CI solo se ejecuta la sintética. La muestra real son 300 filas del test split, no el conjunto completo. La UI de Streamlit no se prueba (solo la API). Y usar el test split es una comprobación puntual que no influye en ninguna decisión: el test se sigue usando una sola vez, como pide el checklist (punto 4).
+
+**Explicación sencilla:** es como hacerle al modelo un examen final de verdad: le damos parcelas nuevas (que nunca vio) por la misma "ventanilla" que usa la app, y comprobamos si acierta la especie. Lo hacemos automático para que la CI lo repita en cada cambio.
+
+**Evidencia:** issue #42 · `tests/test_end_to_end.py` · `requirements.txt` (`httpx==0.27.2`) · `docs/TESTING.md`.
+
+**Responsable:** @nagicome03.
 
 ---
 
