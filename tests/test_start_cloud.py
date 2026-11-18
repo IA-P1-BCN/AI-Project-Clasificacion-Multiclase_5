@@ -104,7 +104,10 @@ def test_supervise_treats_a_clean_exit_as_failure():
     assert long_running.poll() is not None
 
 
-# --- model configuration (review of PR #116, points 1 and 2) ---
+# --- model configuration ---
+# A missing model must fail instead of silently becoming a synthetic one, and a
+# download must be checked before it is unpickled: unpickling an unchecked file
+# can run arbitrary code.
 
 def test_missing_model_without_model_url_fails(tmp_path):
     model_path = tmp_path / "model.joblib"

@@ -40,7 +40,7 @@ deployment procedure documented in `docs/APP.md`.
 | File | Change |
 |---|---|
 | `render.yaml` | `plan: free`; `MODEL_URL`, `MODEL_METADATA_URL`, `MODEL_SHA256` of release `model-b-v1`; `AB_TRAFFIC_B=0`; `OMP_NUM_THREADS=1`; `API_STARTUP_TIMEOUT=300`; `branch: feature/39-cloud-deployment` (temporary). |
-| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; `--check` waits up to 60 s (was 25 s) for its test servers; docstring targets Render. After the review of PR #116: no model without `MODEL_URL` is an error unless `ALLOW_BOOTSTRAP_MODEL=1`; `MODEL_SHA256` required with `MODEL_URL` (`require_model_sha256`); `supervise` watches FastAPI and Streamlit and exits non-zero if either stops; `--check` step 0 checks both configuration errors. |
+| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; `--check` waits up to 60 s (was 25 s) for its test servers; docstring targets Render. Startup safety: no model without `MODEL_URL` is an error unless `ALLOW_BOOTSTRAP_MODEL=1`; `MODEL_SHA256` required with `MODEL_URL` (`require_model_sha256`); `supervise` watches FastAPI and Streamlit and exits non-zero if either stops; `--check` step 0 checks both configuration errors. |
 | `tests/test_start_cloud.py` | New. Unit tests without network: `sha256_of`, `download_file` (right and wrong SHA-256 with `file://` URLs), `wait_for_url` (process exits first, timeout), `supervise`, and the two configuration rules. |
 | `docs/TESTING.md` | New test file in the coverage table; note on running the real end-to-end test of #42 on its own on machines with little RAM. |
 | `app/main.py` | Footer reads the model name from `model_metadata.json` next to `MODEL_PATH`; *Aspen* example replaced; comment on the examples updated. |
@@ -70,13 +70,15 @@ Decisions and reasons:
 - **No silent fallback at all.** A misconfigured deployment must fail instead
   of serving the synthetic bootstrap model, whose footer would wrongly claim
   it was trained on the Covertype data. The fallback stays only behind
-  `ALLOW_BOOTSTRAP_MODEL=1` for local development (review of PR #116).
+  `ALLOW_BOOTSTRAP_MODEL=1` for local development: a public service must not
+  answer with predictions from a model fitted on made-up data.
 - **`MODEL_SHA256` mandatory with `MODEL_URL`.** `load_model` unpickles the
-  file, so an unchecked download could run arbitrary code (review of PR #116).
+  file, and unpickling an unchecked file can run arbitrary code.
 - **The launcher supervises both services.** Previously it only waited on
   Streamlit, so a dead API kept `/_stcore/health` green while every prediction
   failed. Now any exit stops the container with a non-zero code and Render
-  restarts it (review of PR #116). The loop uses the standard library and
+  restarts it, so a dead service is recovered instead of hidden. The loop
+  uses the standard library and
   polls once per second, so the measured memory does not change.
 
 Boundary notes:
@@ -91,7 +93,7 @@ Boundary notes:
   models classify as Aspen (RF 0.72, XGBoost 0.62). The other six examples
   were unchanged and predict their class with both models.
 - `render.yaml` points to `branch: feature/39-cloud-deployment` only to test
-  on Render before the PR. The team decided (review of PR #116) that Render
+  on Render before the PR. The team decided that Render
   follows `main` with `autoDeploy: true`; the switch is done after `main`
   contains this code (see *After merging to main*).
 - Removed with the owner's approval: `deploy/huggingface/` (abandoned
@@ -100,18 +102,23 @@ Boundary notes:
 
 ## After merging to main
 
-Render follows `main` with `autoDeploy: true` (team decision, review of
-PR #116). Until `main` contains this code, `render.yaml` keeps
+Render follows `main` with `autoDeploy: true` (team decision). Until `main`
+contains this code, `render.yaml` keeps
 `branch: feature/39-cloud-deployment` so the live service keeps deploying.
 **Do not delete `feature/39-cloud-deployment` before step e):** the site would
 keep running but would stop updating. Steps, in this order:
 
 - [ ] a) Check that `main` contains `render.yaml`, `scripts/start_cloud.py` and
       `app/main.py` from this branch.
-- [ ] b) Change `branch:` to `main` in `render.yaml` (small commit to `main`
-      or to `develop`, following the team's flow).
-- [ ] c) In Render → **Blueprints** → `covertype-classifier` → **Settings**,
-      change the Blueprint branch to `main` and press **Manual sync**.
+- [ ] b) Change `branch:` to `main` in `render.yaml` on a new branch from
+      `develop` (e.g. `feature/39-render-track-main`) with a PR to `develop`;
+      it reaches `main` with the next release merge. **Never commit directly
+      to `main`** (Git Flow).
+- [ ] c) Only when `main` already contains this code: in Render →
+      **Blueprints** → `covertype-classifier` → **Settings**, change the
+      Blueprint branch to `main` and press **Manual sync**. Render reads
+      `render.yaml` from `main`, so the service follows `main` once the change
+      of step b) is there too.
 - [ ] d) Verify the public URL https://multiclass-covertype-app.onrender.com:
       health, one prediction and the model footer
       (*XGBoost optimizado (v0.2.0)*).
@@ -187,7 +194,8 @@ On Render (deployed from this branch with `render.yaml`):
 https://multiclass-covertype-app.onrender.com — the *Aspen* example predicts
 Aspen (62.1 %) and the footer reads *XGBoost optimizado (v0.2.0)*.
 
-After the review of PR #116 (2026-11-18, image of the Compose `api`
+After adding the startup safety checks and the supervision (2026-11-18,
+image of the Compose `api`
 service): `tests/test_start_cloud.py` 10 passed; `--check` passes, including
 the new step 0. Launcher without a model and without `MODEL_URL`: exits 1 with
 the `ALLOW_BOOTSTRAP_MODEL` hint, services not started. `MODEL_URL` without
