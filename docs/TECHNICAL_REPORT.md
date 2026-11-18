@@ -234,10 +234,11 @@ the 406,708 training rows only.
 | | **Macro average** | 0.9423 | 0.9012 | 0.9199 | 87,152 |
 | | Weighted average | 0.9512 | 0.9510 | 0.9507 | 87,152 |
 
-Every class exceeds F1 0.87. The imbalance signature remains: **Aspen (5) has the
-lowest recall (0.756)** despite high precision — the forest predicts the minority
-classes conservatively. Validation figures are essentially identical (macro F1
-0.9186); see [MODELING.md](MODELING.md#results).
+Every class exceeds F1 0.84, the lowest being Aspen (0.8410). The imbalance
+signature remains: **Aspen (5) has the lowest recall (0.756)** despite high
+precision (0.948) — the forest predicts the minority classes conservatively.
+Validation figures are essentially identical (macro F1 0.9186); see
+[MODELING.md](MODELING.md#results).
 
 ### Confusion matrix — test set (row-normalized recall %)
 
@@ -359,8 +360,8 @@ app.
   **95.1% test accuracy and 0.920 macro F1**, beating every other model tried and
   all baselines, with a controlled **+4.80 pp** overfitting gap.
 - Performance is **strong and consistent across all seven classes** (every F1
-  ≥ 0.87 on test) despite a ~1:103 imbalance, which is why macro F1 — not accuracy
-  — drove every decision.
+  ≥ 0.84 on test, lowest Aspen 0.8410) despite a ~1:103 imbalance, which is why
+  macro F1 — not accuracy — drove every decision.
 - The model is **interpretable and its errors are understood:** `Elevation`
   dominates (MDI, permutation and SHAP agree), and two thirds of errors are a
   genuine elevation overlap between the two majority classes.
