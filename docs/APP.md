@@ -465,140 +465,178 @@ block startup. The frontend reaches the backend at `http://api:8000`
 
 ## Deployment
 
-Issue #39. The application is deployed to **Hugging Face Spaces** (Docker SDK).
-Verify the cloud entrypoint, model provisioning (including the `MODEL_URL`
-download path), database initialization, FastAPI endpoints and Streamlit
-readiness from the project root:
+Issue #39. The application is deployed to **Render** (free plan, Docker web
+service) from the Blueprint [render.yaml](../render.yaml). It serves the
+**tuned XGBoost of #52 (model B)** as its only model. Verify the cloud
+entrypoint, model provisioning (including the `MODEL_URL` download path),
+database initialization, FastAPI endpoints and Streamlit readiness from the
+project root:
 
 ```bash
 docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
   ai-project-clasificacion-multiclase_5-app python scripts/start_cloud.py --check
 ```
 
-### Cloud provider choice: Hugging Face Spaces
+### Cloud provider and served model
 
-The exported model ([Model export](#model-export)) is a 100-tree
-`RandomForestClassifier` with `max_depth=None`: 136.3 MB on disk and
-**~1.17 GiB of RAM** once FastAPI + Streamlit are running (measured with
-`docker stats` on 2026-11-17). That rules out every free tier with 512 MB.
+Render's free plan gives **512 MB of RAM and 0.1 CPU**. The Random Forest of
+the [Model export](#model-export) (#32) needs ~1.17 GiB of RAM once FastAPI and
+Streamlit are running, so it does not fit. Model B (#52) does:
 
-| Provider | Free RAM | Real model fits | Decision |
-|---|---|---|---|
-| **Hugging Face Spaces** (Docker SDK) | 16 GB, 2 vCPU | Yes | **Chosen** |
-| Render (Docker web service, [render.yaml](../render.yaml)) | 512 MB | No (would need the synthetic bootstrap model or a smaller model) | Kept as alternative |
-| Streamlit Community Cloud | ~1 GB | Borderline; no FastAPI process, 100 MB GitHub file limit | Discarded |
-| Vercel | Serverless (250 MB bundle) | No; no long-running Streamlit/WebSocket server | Discarded |
+| Model | Validation accuracy | Validation macro F1 | Size on disk | RAM of the running container | Served on Render |
+|---|---|---|---|---|---|
+| Random Forest, untuned (#32, `model.joblib`) | 0.9520 | 0.9186 | 136.3 MB | ~1.17 GiB | No |
+| **XGBoost, tuned (#52, `model_b.joblib`)** | **0.9471** | **0.9244** | 19.6 MB | **~307 MiB** | **Yes** |
 
-Free Spaces sleep after ~48 h without traffic and their disk is ephemeral:
-the SQLite database (predictions and feedback) is reset on every restart or
-rebuild. Point `DATABASE_URL` to an external MySQL 8.0 server to persist it.
+Model B loses 0.5 points of accuracy and gains 0.6 points of macro F1 (better
+on the minority classes). Metrics are on the validation split
+(`model_metadata.json` of each model); RAM measured with `docker stats` (see
+[Verification of the Render setup](#verification-of-the-render-setup)).
+
+Discarded: **Hugging Face Spaces** (Docker Spaces require a PRO account),
+**Streamlit Community Cloud** (no FastAPI process, ~1 GB RAM, 100 MB GitHub
+file limit) and **Vercel** (serverless, no long-running Streamlit/WebSocket
+server).
+
+### Where the model comes from
+
+The model is **not** in Git (hard rule #5). It is attached to the GitHub
+release [`model-b-v1`](https://github.com/IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5/releases/tag/model-b-v1):
+
+- `model_b.joblib`, SHA-256 `d679fe0e27d76b565a4375fb58f014f9f30af83c29dd9f7f6af70fb86f0be604`
+- `model_b_metadata.json` (hyperparameters, metrics, label mapping, versions)
+
+Reproduce both files with the raw dataset in place:
+
+```bash
+python src/export_challenger.py
+```
+
+The pickled pipeline wraps the XGBoost in `LabelOffsetClassifier`
+(`src/model_comparison.py`), so `src/` must be importable when it is loaded;
+`app/serving.py` already adds it to `sys.path`.
 
 ### Cloud architecture
 
-The Space repository holds only two files, kept in this repository under
-[deploy/huggingface/](../deploy/huggingface/):
+One container runs everything (`SERVICE_ROLE=all`), built from the project
+[Dockerfile](../Dockerfile) with the command `python scripts/start_cloud.py`:
 
-- [deploy/huggingface/README.md](../deploy/huggingface/README.md): Space card
-  with the configuration front matter (`sdk: docker`, `app_port: 7860`).
-- [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile): builds on
-  `python:3.11-slim`, runs as UID 1000 (required by Spaces), clones this
-  public GitHub repository at `REPO_REF` (default `develop`), installs
-  [requirements.txt](../requirements.txt) and starts
-  [scripts/start_cloud.py](../scripts/start_cloud.py).
+1. **Provisioning, in a child process (`--provision`).** If `MODEL_PATH` is
+   missing, the model is downloaded from `MODEL_URL`, written to a temporary
+   file and renamed only if its SHA-256 matches `MODEL_SHA256`; then it is
+   validated with `app.serving.load_model`. `MODEL_METADATA_URL` is saved as
+   `model_metadata.json` next to it (the Streamlit footer reads the model name
+   from it). Any failure stops the container: there is no silent fallback when
+   `MODEL_URL` is set. Then the database is initialized
+   (`src/database.py::init_db`). The child process exits before the services
+   start, so its memory (~230 MiB with the model loaded) is released.
+2. **FastAPI** (`uvicorn app.api:app`) starts on `127.0.0.1:8000`. The launcher
+   waits for `GET /health` up to `API_STARTUP_TIMEOUT` seconds and fails at
+   once if the API process dies.
+3. **Streamlit** runs on `0.0.0.0:$PORT` (Render injects `PORT`).
 
-This keeps binary files (`docs/figures/*.png`, `*.joblib`) out of the Space
-git repository and leaves the project [Dockerfile](../Dockerfile) (#38)
-untouched. At startup, `scripts/start_cloud.py`:
+The launcher itself only uses the standard library (~25 MiB). Without the
+child process it kept the ML imports and a loaded copy of the model (~230 MiB)
+next to the API, and the container was killed for exceeding 512 MB.
 
-1. **Provisions the model (`ensure_cloud_model`).** An existing `MODEL_PATH`
-   is used as-is. Otherwise, if `MODEL_URL` is set, the exported model is
-   downloaded to `MODEL_PATH`, checked against `MODEL_SHA256` (written to a
-   temporary file and renamed only if the checksum matches) and validated with
-   `app.serving.load_model`; any failure stops the container. Only when
-   `MODEL_URL` is unset does it fit a synthetic 30-tree bootstrap model
-   (`model_version = "0.1.0-cloud-bootstrap"`) and log a warning: its
-   predictions are **not** those of the project model.
-2. **Initializes the database** (`src/database.py::init_db`).
-3. **Starts FastAPI** (`uvicorn app.api:app`) on `127.0.0.1:$API_PORT`, waits
-   for `GET /health`, then runs **Streamlit** in the foreground on
-   `0.0.0.0:$PORT` (`SERVICE_ROLE=all`). `SERVICE_ROLE=api` / `app` runs a
-   single service.
+Only one model is served: `AB_TRAFFIC_B=0` and there is no `MODEL_B_PATH` file
+on Render, so the A/B test of #52 is off (`/health` reports
+`ab_test.enabled: false`).
 
-The model is hosted in a Hugging Face **model** repository, which stores large
-files natively and serves them at
-`https://huggingface.co/<owner>/<model-repo>/resolve/main/model.joblib`.
+### Limitations of the free plan
+
+- **Sleeps after 15 minutes without traffic.** The next request wakes it up.
+  Render announces about a minute to spin an instance up, but this container
+  also downloads and loads the model on every start: in the local simulation
+  with 0.1 CPU the full cold start took **~5 minutes** (see below). Measure it
+  on Render.
+- **The SQLite database is lost on every restart, redeploy or sleep.** The
+  filesystem is ephemeral, so predictions, feedback and `/metrics` start from
+  zero. Point `DATABASE_URL` to an external MySQL 8.0 server to persist them.
+- **0.1 CPU.** Predictions are slower than locally; `OMP_NUM_THREADS=1` keeps
+  XGBoost from starting more threads than the CPU share can run.
 
 ### Configuration and environment variables
 
 Runtime settings are read from the environment. [.env.example](../.env.example)
 lists the database variables plus `MODEL_PATH` and `API_URL` (the Compose
-defaults; change `MODEL_PATH` only to load a model from a non-default path).
-The Space [Dockerfile](../deploy/huggingface/Dockerfile) sets the cloud
-defaults and the Space settings add the model variables:
+defaults). [render.yaml](../render.yaml) sets the cloud values:
 
-| Variable | Default | Used by | Description |
-|---|---|---|---|
-| `SERVICE_ROLE` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
-| `PORT` | `7860` (Space) / `8501` (`8000` when `SERVICE_ROLE=api`) | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port; must match `app_port` in the Space card. Render injects it. |
-| `API_PORT` | `8000` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Loopback port of FastAPI in `SERVICE_ROLE=all`. |
-| `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
-| `MODEL_PATH` | `models/model.joblib` | [app/serving.py](../app/serving.py) | Path to the serialized scikit-learn `Pipeline` (#32). |
-| `MODEL_URL` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the exported `model.joblib`, downloaded when `MODEL_PATH` is missing. |
-| `MODEL_SHA256` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in `models/model_metadata.json`). Recommended. |
-| `MODEL_METADATA_URL` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional URL of `model_metadata.json`, saved next to the model. |
-| `HF_TOKEN` | unset | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional Bearer token, only if the model repository is private. Set it as a Space **secret**. |
-| `REPO_REF` | `develop` | [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile) (build arg) | Git branch or tag of this repository cloned into the Space. |
-| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local & cloud) | [src/database.py](../src/database.py) | Database connection string (#37). |
-| `MYSQL_DATABASE` | `multiclass` | `db` container | MySQL database created on startup. |
-| `MYSQL_USER` | `app` | `db` container | MySQL application user. |
-| `MYSQL_PASSWORD` | `app` | `db` container | MySQL application password. |
-| `MYSQL_ROOT_PASSWORD` | `root` | `db` container | MySQL root password for healthchecks. |
-| `MYSQL_PORT` | `3306` | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
-| `MODEL_B_PATH` | `models/model_b.joblib` | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional: without the file everything is served by `MODEL_PATH`. |
-| `AB_TRAFFIC_B` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
-| `API_URL` | `http://api:8000` | `app` container | Backend URL for the frontend (`docker-compose.yml`). The Streamlit page does not call it yet (#33). |
+| Variable | Default | Render value | Used by | Description |
+|---|---|---|---|---|
+| `SERVICE_ROLE` | `all` | `all` | [scripts/start_cloud.py](../scripts/start_cloud.py) | `all` (FastAPI + Streamlit in one container), `api` (FastAPI only), or `app` (Streamlit only). |
+| `PORT` | `8501` (`8000` when `SERVICE_ROLE=api`) | injected by Render | [scripts/start_cloud.py](../scripts/start_cloud.py) | Public HTTP port of Streamlit. |
+| `API_PORT` | `8000` | - | [scripts/start_cloud.py](../scripts/start_cloud.py) | Loopback port of FastAPI in `SERVICE_ROLE=all`. |
+| `API_URL` | `http://127.0.0.1:8000` (cloud) / `http://api:8000` (Compose) | `http://127.0.0.1:8000` | [app/main.py](../app/main.py) | Base URL of the FastAPI backend consumed by the Streamlit UI. |
+| `API_STARTUP_TIMEOUT` | `300` | `300` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Seconds to wait for FastAPI `/health` before failing. |
+| `MODEL_PATH` | `models/model.joblib` | `/app/models/model.joblib` | [app/serving.py](../app/serving.py), [app/main.py](../app/main.py) | Path of the served pipeline; its `model_metadata.json` sibling names the model in the footer. |
+| `MODEL_URL` | unset | release `model-b-v1`, `model_b.joblib` | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the model, downloaded when `MODEL_PATH` is missing. |
+| `MODEL_SHA256` | unset | `d679fe0e…0be604` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in the metadata). |
+| `MODEL_METADATA_URL` | unset | release `model-b-v1`, `model_b_metadata.json` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Metadata saved as `model_metadata.json` next to the model. |
+| `HF_TOKEN` | unset | - | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional Bearer token for a private model URL. |
+| `AB_TRAFFIC_B` | `0` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
+| `MODEL_B_PATH` | `models/model_b.joblib` | - (file absent) | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional. |
+| `OMP_NUM_THREADS` | unset | `1` | XGBoost | OpenMP threads used for prediction. |
+| `DATABASE_URL` | `mysql+pymysql://app:app@db:3306/multiclass` (Docker) / `sqlite:///data/processed/multiclass.db` (local) | `sqlite:////app/data/processed/multiclass.db` | [src/database.py](../src/database.py) | Database connection string (#37). |
+| `MYSQL_DATABASE` | `multiclass` | - | `db` container | MySQL database created on startup. |
+| `MYSQL_USER` | `app` | - | `db` container | MySQL application user. |
+| `MYSQL_PASSWORD` | `app` | - | `db` container | MySQL application password. |
+| `MYSQL_ROOT_PASSWORD` | `root` | - | `db` container | MySQL root password for healthchecks. |
+| `MYSQL_PORT` | `3306` | - | `docker-compose.yml` | Host port published for the `db` service (`${MYSQL_PORT:-3306}:3306`); change it if 3306 is taken locally. |
 
 ### Readiness and health checks
 
 - **Streamlit UI health check (`GET /_stcore/health`):** returns `ok` (HTTP 200).
-  Spaces mark the app as *Running* once `app_port` answers.
+  It is the `healthCheckPath` of the Render service. Streamlit only starts once
+  the model is provisioned and FastAPI is healthy, so `ok` means the whole
+  stack is ready.
 - **FastAPI health check (`GET /health`):** returns HTTP 200 with `status`
-  (`"ok"`), `model_loaded` (`bool`), `db_connected` (`bool`), `detail` and
-  `db_detail`. In `SERVICE_ROLE=all` it is only reachable inside the container.
+  (`"ok"`), `model_loaded` (`bool`), `db_connected` (`bool`), `detail`,
+  `db_detail` and `ab_test`. In `SERVICE_ROLE=all` it is only reachable inside
+  the container.
 
-### Step-by-step deployment on Hugging Face Spaces
+### Step-by-step deployment on Render
 
-1. **Upload the model.** Sign in to <https://huggingface.co>, click
-   **New** → **Model**, create a public repository (e.g.
-   `<owner>/covertype-random-forest`) and, in **Files** → **Add file** →
-   **Upload files**, upload `models/model.joblib` and
-   `models/model_metadata.json` produced by `python src/export_model.py`.
-2. **Create the Space.** **New** → **Space**, SDK **Docker** → **Blank**,
-   hardware **CPU basic (free)**, visibility public.
-3. **Add the Space files.** In the Space **Files** tab, upload
-   [deploy/huggingface/README.md](../deploy/huggingface/README.md) and
-   [deploy/huggingface/Dockerfile](../deploy/huggingface/Dockerfile) to the
-   root, replacing the generated `README.md`.
-4. **Configure variables** in **Settings** → **Variables and secrets**:
-   - `MODEL_URL` = `https://huggingface.co/<owner>/covertype-random-forest/resolve/main/model.joblib`
-   - `MODEL_METADATA_URL` = `https://huggingface.co/<owner>/covertype-random-forest/resolve/main/model_metadata.json`
-   - `MODEL_SHA256` = value of `model_sha256` in `models/model_metadata.json`
-   - (optional) `REPO_REF` = branch to deploy, e.g. `feature/39-cloud-deployment`
-     before the merge into `develop`.
-5. **Build.** The Space builds automatically; the logs must show
-   `[start_cloud] model status: downloaded` and
-   `[start_cloud] FastAPI healthy at http://127.0.0.1:8000`. The app is public at
-   `https://huggingface.co/spaces/<owner>/<space>` (direct URL
-   `https://<owner>-<space>.hf.space`).
-6. **Redeploy after a merge.** The Space does not watch GitHub: use
-   **Settings** → **Factory rebuild** to clone the latest `REPO_REF`.
+1. Sign in to <https://dashboard.render.com> with an account that has access to
+   the GitHub repository `IA-P1-BCN/AI-Project-Clasificacion-Multiclase_5`.
+2. Click **New** → **Blueprint**, select the repository and confirm. Render
+   reads [render.yaml](../render.yaml) and proposes one web service,
+   `multiclass-covertype-app` (Docker, plan *Free*). All variables come from the
+   file; nothing has to be typed.
+3. Click **Deploy Blueprint**. The logs must show
+   `[start_cloud] model status: downloaded at /app/models/model.joblib`,
+   `[start_cloud] database initialized.` and
+   `[start_cloud] FastAPI healthy at http://127.0.0.1:8000`.
+4. Open the public URL `https://<service-name>.onrender.com`, load an example
+   and press *Predecir*. The footer must read *XGBoost optimizado (v0.2.0)*.
+5. `autoDeploy: true` redeploys on every push to the branch set in
+   `render.yaml` (`feature/39-cloud-deployment` while testing, `develop`
+   after the merge of #39).
 
-### Alternative: Render
+### Verification of the Render setup
 
-[render.yaml](../render.yaml) remains available (**New +** → **Blueprint** on
-<https://dashboard.render.com>). On the free plan (512 MB) the real model does
-not fit, so the container serves the synthetic bootstrap model unless a paid
-instance with more memory is used together with `MODEL_URL` and `MODEL_SHA256`.
+Local simulation of the free plan on 2026-11-18: project image,
+`docker run --memory=512m --memory-swap=512m --cpus=0.1 -e PORT=10000` and the
+environment of [render.yaml](../render.yaml), downloading the real model from
+the release:
+
+- Logs: `model status: downloaded`, `database initialized.`,
+  `FastAPI healthy`; Streamlit `/_stcore/health` = `ok` **301 s** after
+  `docker run` (provisioning ~3.5 min, FastAPI startup ~1 min).
+- `GET /health`: `status: ok`, `model_loaded: true`, `db_connected: true`,
+  `ab_test.enabled: false`.
+- Prediction through Streamlit (`streamlit.testing` `AppTest` inside the
+  container, calling the running API): *Aspen* button → Aspen 62 %,
+  *Ponderosa Pine* button → Ponderosa Pine 47 %, no errors; footer
+  *XGBoost optimizado (v0.2.0)*; 2 rows stored in SQLite.
+- `docker stats`: **305 MiB** when ready, **307 MiB** after the predictions
+  (launcher 25 MiB, FastAPI ~330 MiB RSS, Streamlit ~47 MiB RSS; RSS counts
+  shared pages, so it does not add up to the container total). No OOM kill.
+- Before provisioning moved to a child process, the same run was killed by the
+  OOM killer while FastAPI loaded the model (the launcher held ~230 MiB).
+
+Not verified locally: Render's own build, its real CPU share and wake-up time,
+and a browser session against the public URL.
 
 ## Usage
 

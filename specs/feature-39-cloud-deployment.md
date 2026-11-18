@@ -6,121 +6,134 @@
 | Milestone | M6 |
 | Branch | `feature/39-cloud-deployment` (from `develop`) |
 | Owner | @levifvy |
-| Depends on | #32 (model export, merged), #34 (FastAPI backend, merged), #35 (feedback & metrics endpoints, merged), #37 (database integration, merged), #1 (base `Dockerfile`, merged) |
+| Depends on | #32 (model export, merged), #34 (FastAPI backend, merged), #35 (feedback & metrics endpoints, merged), #37 (database integration, merged), #1 (base `Dockerfile`, merged), #52 (A/B testing: model B and `LabelOffsetClassifier`, merged) |
 
 ## Goal
 
 Deploy the Streamlit frontend and the FastAPI backend (`/health`, `/predict`,
-`/feedback`, `/metrics`) to a free cloud host **serving the real exported
-model**, with a reproducible startup entrypoint (`scripts/start_cloud.py`) and
-the deployment procedure documented in `docs/APP.md`.
+`/feedback`, `/metrics`) to a free cloud host **serving a real trained model**,
+with a reproducible startup entrypoint (`scripts/start_cloud.py`) and the
+deployment procedure documented in `docs/APP.md`.
 
 ## Scope
 
 - In scope:
-  - Provider selection and justification: **Hugging Face Spaces** (Docker SDK)
-    as primary target, Render (`render.yaml`) kept as alternative, Vercel and
-    Streamlit Community Cloud discarded.
-  - `deploy/huggingface/README.md` + `deploy/huggingface/Dockerfile`: the two
-    files of the Space repository. The Dockerfile clones this public GitHub
-    repository at build time (`REPO_REF`, default `develop`), runs as UID 1000
-    and starts `scripts/start_cloud.py` on port 7860.
-  - `scripts/start_cloud.py`:
-    1. `ensure_cloud_model`: keeps an existing `MODEL_PATH`; otherwise
-       downloads the exported model from `MODEL_URL` (atomic write, optional
-       `MODEL_SHA256` check, optional `MODEL_METADATA_URL`, optional
-       `HF_TOKEN`), failing loudly on any error; only without `MODEL_URL` does
-       it fit the synthetic bootstrap model (`0.1.0-cloud-bootstrap`), logging
-       a warning.
-    2. Initializes the database (`src/database.py::init_db`).
-    3. Runs FastAPI on loopback and Streamlit on `0.0.0.0:$PORT`
-       (`SERVICE_ROLE=all`, or `api` / `app` alone).
-    4. `--check`: self-cleaning end-to-end verification, including the
-       `MODEL_URL` download path through a `file://` URL and a rejected
-       SHA-256 mismatch.
-  - `render.yaml`: kept, with a header comment stating its memory limitation.
-  - `docs/APP.md`: `## Deployment` rewritten for Hugging Face Spaces.
+  - Provider: **Render, free plan** (512 MB RAM, 0.1 CPU), Blueprint
+    `render.yaml`. Hugging Face Spaces, Streamlit Community Cloud and Vercel
+    discarded (see Decisions).
+  - Served model: **model B of #52** (tuned XGBoost), downloaded at startup
+    from the GitHub release `model-b-v1` and checked against its SHA-256.
+    Single model, no A/B split (`AB_TRAFFIC_B=0`).
+  - `scripts/start_cloud.py`: model download + SHA-256 check, provisioning in
+    a child process, configurable API startup timeout, `--check` self-test.
+  - `render.yaml`: free plan, model variables, timeouts for 0.1 CPU.
+  - `app/main.py` (minimal change, see Boundary notes).
+  - `docs/APP.md`: `## Deployment` rewritten for Render.
 - Out of scope:
   - Editing `Dockerfile` or `docker-compose.yml` (#38, @carovasq).
-  - Shrinking or retraining the model (modeling issues) to fit 512 MB tiers.
-  - Persistent cloud database: the Space uses ephemeral SQLite unless
+  - Training or exporting models (#32, #52); this branch only serves model B.
+  - Persistent cloud database: Render uses ephemeral SQLite unless
     `DATABASE_URL` points to an external MySQL server.
-  - The Streamlit prediction form (#33, @nagicome03).
 
 ## Design
 
 | File | Change |
 |---|---|
-| `deploy/huggingface/Dockerfile` | New. Space image: clone repo at `REPO_REF`, install requirements, `PORT=7860`, `CMD python scripts/start_cloud.py`. |
-| `deploy/huggingface/README.md` | New. Space card with front matter (`sdk: docker`, `app_port: 7860`). |
-| `scripts/start_cloud.py` | `sha256_of`, `download_file`, `fetch_remote_model`; `ensure_cloud_model` resolution order; `--check` step 1b; fixes in `label_mapping` call and `/metrics` keys. |
-| `render.yaml` | Header comment only. |
-| `docs/APP.md` | `## Deployment` section. |
+| `render.yaml` | `plan: free`; `MODEL_URL`, `MODEL_METADATA_URL`, `MODEL_SHA256` of release `model-b-v1`; `AB_TRAFFIC_B=0`; `OMP_NUM_THREADS=1`; `API_STARTUP_TIMEOUT=300`; `branch: feature/39-cloud-deployment` (temporary). |
+| `scripts/start_cloud.py` | Heavy imports moved inside functions; new `--provision` mode (model + DB) run as a child process by `run_services`; `API_STARTUP_TIMEOUT` (default 300 s, was 30 s); `wait_for_url(..., proc=)` fails at once if the API process dies; docstring targets Render. |
+| `app/main.py` | Footer reads the model name from `model_metadata.json` next to `MODEL_PATH`; *Aspen* example replaced; comment on the examples updated. |
+| `docs/APP.md` | `## Deployment`: provider and model comparison, model origin, architecture, free-plan limitations, variables, Render steps, verification. |
 
 Decisions and reasons:
 
-- **Hugging Face Spaces over Render.** The exported model
-  (`RandomForestClassifier`, 100 trees, `max_depth=None`) is 136.3 MB on disk
-  and the running container uses ~1.17 GiB of RAM (`docker stats`). Render's
-  free plan has 512 MB, so on Render the app could only serve a synthetic
-  model whose predictions are not the project's. Free Spaces offer 16 GB RAM
-  and 2 vCPU, build Docker images, and sleep only after ~48 h idle.
-- **Vercel and Streamlit Community Cloud discarded.** Vercel is serverless
-  (250 MB bundle, no long-running Streamlit/WebSocket process). Streamlit
-  Community Cloud runs no FastAPI process, has ~1 GB RAM and needs the model
-  in GitHub (100 MB file limit, hard rule #5).
-- **Space clones GitHub instead of mirroring the repository.** Spaces reject
-  binary files outside LFS/Xet (`docs/figures/*.png`); cloning keeps the Space
-  to two text files and avoids any CI secret. Redeploy = *Factory rebuild*.
-- **Model hosted in a Hugging Face model repository, downloaded at startup.**
-  Keeps `*.joblib` out of Git (hard rule #5). Download uses `urllib` from the
-  standard library: **no new dependency**. `MODEL_SHA256` (from
-  `model_metadata.json`) guarantees the served model is the exported one.
+- **Render free instead of Hugging Face Spaces.** Docker Spaces now require a
+  PRO account. Render's free plan builds the project `Dockerfile` directly
+  from GitHub.
+- **Model B (XGBoost) instead of the Random Forest.** The Random Forest of #32
+  needs ~1.17 GiB of RAM in the running container; Render free has 512 MB.
+  Model B: validation accuracy 0.9471 vs 0.9520 (RF), macro F1 0.9244 vs
+  0.9186 (RF), 19.6 MB on disk, ~307 MiB of RAM for the whole container.
+- **Model hosted as a GitHub release asset.** Keeps `*.joblib` out of Git
+  (hard rule #5); public URL, no token. Reproducible with
+  `python src/export_challenger.py`. Download uses `urllib`: **no new
+  dependency**.
+- **Provisioning in a child process.** In the first 512 MB simulation the
+  launcher kept the ML imports and a loaded copy of the model (~230 MiB) while
+  FastAPI loaded its own, and FastAPI was OOM-killed. Running provisioning in a
+  child process that exits first, and keeping the launcher on the standard
+  library, leaves it at ~25 MiB.
+- **Longer startup timeout.** With 0.1 CPU, FastAPI took ~1 min to import and
+  load the model, more than the previous fixed 30 s.
 - **No silent fallback when `MODEL_URL` is set.** A misconfigured deployment
-  must fail instead of serving synthetic predictions.
+  must fail instead of serving the synthetic bootstrap model.
+
+Boundary notes:
+
+- `app/main.py` belongs to #33 (@nagicome03, @carovasq). Minimal change only:
+  (1) the footer said "Random Forest"; it now reads `estimator`, `tuned` and
+  `model_version` from `model_metadata.json` next to `MODEL_PATH` (falls back
+  to a generic text), so it shows *Random Forest (v0.1.0)* locally and
+  *XGBoost optimizado (v0.2.0)* on Render; (2) the *Aspen* example button
+  predicted *Lodgepole Pine* (0.73) with model B, so it was replaced by another
+  real Aspen training cell (Elevation 2802, Wilderness 3, Soil 33) that both
+  models classify as Aspen (RF 0.72, XGBoost 0.62). The other six examples
+  were unchanged and predict their class with both models.
+- `render.yaml` points to `branch: feature/39-cloud-deployment` only to test
+  on Render before the PR. **After the merge it must go back to
+  `branch: develop`.**
+- Pending decision of the owner: removing `src/lite_model.py` (untracked),
+  `models/lite_candidates/` (git-ignored) and `deploy/huggingface/`, which
+  belong to the abandoned "lite model" and Hugging Face plans.
 
 ## Acceptance criteria
 
-- [x] Choose provider (Render/Vercel/AWS) — Hugging Face Spaces, justified above
-- [x] Prepare deployment config
+- [x] Choose provider (Render/Vercel/AWS) — Render free, justified above
+- [x] Prepare deployment config (`render.yaml`)
 - [ ] Deploy and verify public URL
 - [x] Document deployment steps
 - [ ] App accessible via a public URL
 - [x] `python scripts/start_cloud.py --check` verifies model availability, `MODEL_URL` download, database initialization, FastAPI (`/health`, `/predict`, `/feedback`, `/metrics`) and Streamlit (`/_stcore/health`) end-to-end and exits 0 (added)
+- [x] The container fits in 512 MB with the real model B (added)
 
 ## Verification
+
+Self-check and tests, project image, repository mounted (with `data/` and
+`models/`):
 
 ```bash
 docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
   ai-project-clasificacion-multiclase_5-app python scripts/start_cloud.py --check
+docker run --rm -v "$PWD:/app" -w /app -e DATABASE_URL= \
+  ai-project-clasificacion-multiclase_5-app sh -c "pip install pytest httpx && python -m pytest -q"
 ```
 
-Observed (2026-11-17, project image, Python 3.11):
+Observed on 2026-11-18 after merging `origin/develop` (#52): `--check` passes
+all six steps; `pytest` 45 passed, 0 skipped.
 
+Render free-plan simulation, same image:
+
+```bash
+docker run --memory=512m --memory-swap=512m --cpus=0.1 -p 10000:10000 -e PORT=10000 \
+  -e SERVICE_ROLE=all -e API_URL=http://127.0.0.1:8000 -e MODEL_PATH=/app/models/model.joblib \
+  -e MODEL_URL=<release model_b.joblib> -e MODEL_METADATA_URL=<release model_b_metadata.json> \
+  -e MODEL_SHA256=d679fe0e27d76b565a4375fb58f014f9f30af83c29dd9f7f6af70fb86f0be604 \
+  -e AB_TRAFFIC_B=0 -e OMP_NUM_THREADS=1 -e API_STARTUP_TIMEOUT=300 \
+  -e DATABASE_URL=sqlite:////app/data/processed/multiclass.db \
+  <image> python scripts/start_cloud.py
 ```
-1. Model artifact check: bootstrapped (71.6 KB)
-1b. MODEL_URL download check: downloaded + SHA-256 verified, mismatch rejected
-2. Database schema check: initialized (SQLite cloud fallback)
-3. FastAPI /health check: {'status': 'ok', 'model_loaded': True, 'db_connected': True, ...}
-4. FastAPI /predict check: cover_type=5 (Aspen), confidence=0.7272, prediction_id=1
-5. FastAPI /feedback & /metrics check: feedback_total=1, live_accuracy=1.0
-6. Streamlit /_stcore/health check: ok
-All cloud deployment checks passed.
-```
 
-Space runtime simulation with the real model (project image, UID 1000,
-`PORT=7860`, empty `MODEL_PATH`, `MODEL_URL=file:///remote/model.joblib`,
-`MODEL_SHA256` from `model_metadata.json`): logs `model status: downloaded`,
-FastAPI healthy, Streamlit `/_stcore/health` = `ok` after ~60 s,
-`/predict` on the sample above returns `Lodgepole Pine` (0.95), memory
-1.171 GiB.
+- Logs: `model status: downloaded at /app/models/model.joblib`,
+  `database initialized.`, `FastAPI healthy`; `/_stcore/health` = `ok` after
+  **301 s**.
+- `GET /health`: `status: ok`, `model_loaded: true`, `db_connected: true`,
+  `ab_test.enabled: false`.
+- Streamlit `AppTest` against the running API: *Aspen* → Aspen 62 %,
+  *Ponderosa Pine* → Ponderosa Pine 47 %, no errors, footer
+  *XGBoost optimizado (v0.2.0)*, 2 rows in SQLite.
+- `docker stats`: **305 MiB** ready, **307 MiB** after predicting; no OOM.
+- With the previous launcher (provisioning in-process) the same run was
+  OOM-killed while FastAPI loaded the model.
 
-After merging `origin/develop` (2f3d2b9: Streamlit frontend #33, Compose
-`api` service #38, unit tests #40), rebuilt image: `--check` passes,
-`pytest` 23 passed, and the Space simulation with the real model serves the
-new UI (Streamlit `AppTest`: *Predecir* button -> `Lodgepole Pine`, 90.0 %,
-no errors), memory 1.237 GiB.
-
-Not verified: building `deploy/huggingface/Dockerfile` itself (it clones
-`develop`, which does not contain these changes until the merge) and the
-public Space URL, which needs a Hugging Face account.
+Not verified: Render's own build and deploy, the public URL, the real wake-up
+time on Render (the local cold start at 0.1 CPU took ~5 min, longer than the
+~1 min Render announces), and an interactive browser session.
