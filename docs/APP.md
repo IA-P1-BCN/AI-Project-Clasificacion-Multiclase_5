@@ -572,7 +572,6 @@ defaults). [render.yaml](../render.yaml) sets the cloud values:
 | `MODEL_URL` | unset | release `model-b-v1`, `model_b.joblib` | [scripts/start_cloud.py](../scripts/start_cloud.py) | URL of the model, downloaded when `MODEL_PATH` is missing. |
 | `MODEL_SHA256` | unset | `d679fe0e…0be604` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Expected SHA-256 of the download (`model_sha256` in the metadata). |
 | `MODEL_METADATA_URL` | unset | release `model-b-v1`, `model_b_metadata.json` | [scripts/start_cloud.py](../scripts/start_cloud.py) | Metadata saved as `model_metadata.json` next to the model. |
-| `HF_TOKEN` | unset | - | [scripts/start_cloud.py](../scripts/start_cloud.py) | Optional Bearer token for a private model URL. |
 | `AB_TRAFFIC_B` | `0` | `0` | [app/api.py](../app/api.py) | Share of `POST /predict` requests (0 to 1) sent to the challenger. `0` turns the A/B test off. |
 | `MODEL_B_PATH` | `models/model_b.joblib` | - (file absent) | [app/serving.py](../app/serving.py) | Challenger model of the A/B test (#52). Optional. |
 | `OMP_NUM_THREADS` | unset | `1` | XGBoost | OpenMP threads used for prediction. |

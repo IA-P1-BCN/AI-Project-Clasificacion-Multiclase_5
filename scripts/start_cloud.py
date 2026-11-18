@@ -123,21 +123,18 @@ def download_file(
     url: str,
     dest: Path,
     expected_sha256: str | None = None,
-    token: str | None = None,
     chunk_size: int = 1 << 20,
 ) -> dict:
     """Download `url` to `dest` atomically and optionally verify its SHA-256.
 
     The file is written to a temporary sibling and renamed only after the
     checksum matches, so a failed or partial download never leaves a broken
-    artifact at `dest`. `token` is sent as a Bearer token (private HF repos).
+    artifact at `dest`.
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url)
-    if token:
-        req.add_header("Authorization", f"Bearer {token}")
     digest = hashlib.sha256()
     size = 0
     try:
@@ -174,11 +171,10 @@ def fetch_remote_model(model_path: Path | None = None, env: dict | None = None) 
     if load_model(model_path).ready:
         return {"status": "existing", "model_path": str(model_path)}
 
-    token = (env.get("HF_TOKEN") or "").strip() or None
-    info = download_file(url, model_path, env.get("MODEL_SHA256") or None, token)
+    info = download_file(url, model_path, env.get("MODEL_SHA256") or None)
     metadata_url = (env.get("MODEL_METADATA_URL") or "").strip()
     if metadata_url:
-        download_file(metadata_url, model_path.with_name("model_metadata.json"), token=token)
+        download_file(metadata_url, model_path.with_name("model_metadata.json"))
 
     verified = load_model(model_path)
     if not verified.ready:
