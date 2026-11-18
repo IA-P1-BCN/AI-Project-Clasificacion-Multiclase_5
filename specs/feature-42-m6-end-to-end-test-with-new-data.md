@@ -35,11 +35,14 @@ Validate the full prediction flow (FastAPI validation -> serving layer -> model
     the response obeys the `PredictionResponse` contract and the accuracy is
     >= 85 %.
   - **Real (gated):** when `models/model.joblib` and `data/raw/covtype.data` are
-    present, loads the exported model and predicts 20 random rows of the real
+    present, loads the exported model and predicts 300 random rows of the real
     test split (never used for training). Asserts the same contract and accuracy
-    >= 70 % (the model's offline accuracy is ~95 %).
+    >= 85 % (the model's offline accuracy is ~95 %). It skips, instead of
+    failing, when the model does not load in the current environment.
 - **DB isolation:** the test points `DATABASE_URL` to a temporary SQLite file, so
-  `POST /predict` does not touch the real database.
+  `POST /predict` does not touch the real database. It also sets `AB_TRAFFIC_B=0`
+  so `/predict` always uses model A (not the A/B challenger, #52), and swaps the
+  served model with `monkeypatch.setattr` so the state is restored.
 - **New dependency:** `httpx` (test-only, required by the FastAPI `TestClient`).
   Pinned below 0.28 because `starlette` 0.38 (used by `fastapi` 0.112) breaks
   with `httpx` 0.28.
@@ -56,8 +59,12 @@ Copied from issue #42:
 docker compose run --rm --no-deps app python -m pytest tests/test_end_to_end.py -v -s
 ```
 
-Observed (Python 3.11.18, the pinned requirements): **2 passed in 9.44 s**.
+Observed (Python 3.11.18, the pinned requirements): **2 passed in 13.57 s**.
 
-- Synthetic: **91 %** accuracy on 126 unseen rows.
-- Real test set: **100 %** accuracy on 20 rows (the random sample happened to be
-  all correct; the model's offline accuracy is ~95 %).
+- Synthetic: **91 %** accuracy on 126 unseen rows (threshold >= 85 %).
+- Real test set: **97 %** accuracy on 300 rows (threshold >= 85 %), close to the
+  model's ~95 % offline accuracy.
+
+The real layer skips (instead of failing) when the exported model does not load
+in the current environment (e.g. a local model exported with another
+scikit-learn version), so a local run only executes the synthetic layer.

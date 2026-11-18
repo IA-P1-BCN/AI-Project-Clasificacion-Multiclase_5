@@ -42,3 +42,9 @@ serving layer, model and response — with data the model never saw:
 The test calls the API through FastAPI's `TestClient`, so it needs `httpx`
 (pinned in `requirements.txt`). The database is isolated in a temporary SQLite
 file, so the test never touches the real one.
+
+> **Local vs Docker.** The real layer needs a model exported with the **pinned**
+> scikit-learn (1.5.1, Python 3.11). A model exported with another version (e.g.
+> local Python 3.13 + sklearn 1.9.1) does not load, and the test **skips**
+> instead of failing. Run it in Docker, or deselect it locally:
+> `pytest --deselect tests/test_end_to_end.py::test_predict_real_test_set`.

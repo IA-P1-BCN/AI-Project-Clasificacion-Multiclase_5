@@ -1139,8 +1139,10 @@ Además, `pydantic` y `scipy` no estaban fijados. Desde #46 lo están (`pydantic
 
 **Justificación:** es la forma reproducible de comprobar que la app/API predice bien con datos nuevos. Usa el `TestClient` de FastAPI (sin levantar Docker a mano) y corre en la CI (#41). Tiene dos capas:
 - **Sintética (siempre corre):** entrena el pipeline con el 70 % de los datos sintéticos del `conftest` y predice el 30 % restante. Resultado observado: **91 % de acierto en 126 filas**.
-- **Real (gateada):** con `models/model.joblib` y `data/raw/covtype.data`, predice 20 filas del **test set real** (nunca visto). Resultado observado: **100 % en 20 filas** (el modelo tiene ~95 % de acierto offline).
+- **Real (gateada):** con `models/model.joblib` y `data/raw/covtype.data`, predice 300 filas del **test set real** (nunca visto). Resultado observado: **97 % en 300 filas** (el modelo tiene ~95 % de acierto offline).
 - La base de datos se aísla en un SQLite temporal, así que el test no toca la BD real.
+
+**Limitación:** la capa real no corre en la CI (allí no hay modelo exportado), así que en CI solo se ejecuta la sintética. La muestra real son 300 filas del test split, no el conjunto completo. La UI de Streamlit no se prueba (solo la API). Y usar el test split es una comprobación puntual que no influye en ninguna decisión: el test se sigue usando una sola vez, como pide el checklist (punto 4).
 
 **Explicación sencilla:** es como hacerle al modelo un examen final de verdad: le damos parcelas nuevas (que nunca vio) por la misma "ventanilla" que usa la app, y comprobamos si acierta la especie. Lo hacemos automático para que la CI lo repita en cada cambio.
 
