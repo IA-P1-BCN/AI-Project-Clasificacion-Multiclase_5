@@ -493,8 +493,7 @@ on the minority classes). Metrics are on the validation split
 (`model_metadata.json` of each model); RAM measured with `docker stats` (see
 [Verification of the Render setup](#verification-of-the-render-setup)).
 
-Discarded: **Hugging Face Spaces** (Docker Spaces require a PRO account),
-**Streamlit Community Cloud** (no FastAPI process, ~1 GB RAM, 100 MB GitHub
+Discarded: **Streamlit Community Cloud** (no FastAPI process, ~1 GB RAM, 100 MB GitHub
 file limit) and **Vercel** (serverless, no long-running Streamlit/WebSocket
 server).
 

@@ -19,8 +19,8 @@ deployment procedure documented in `docs/APP.md`.
 
 - In scope:
   - Provider: **Render, free plan** (512 MB RAM, 0.1 CPU), Blueprint
-    `render.yaml`. Hugging Face Spaces, Streamlit Community Cloud and Vercel
-    discarded (see Decisions).
+    `render.yaml`. Streamlit Community Cloud and Vercel discarded (see
+    Decisions).
   - Served model: **model B of #52** (tuned XGBoost), downloaded at startup
     from the GitHub release `model-b-v1` and checked against its SHA-256.
     Single model, no A/B split (`AB_TRAFFIC_B=0`).
@@ -46,9 +46,10 @@ deployment procedure documented in `docs/APP.md`.
 
 Decisions and reasons:
 
-- **Render free instead of Hugging Face Spaces.** Docker Spaces now require a
-  PRO account. Render's free plan builds the project `Dockerfile` directly
-  from GitHub.
+- **Render free.** It builds the project `Dockerfile` directly from GitHub
+  and runs a long-lived container (FastAPI + Streamlit) at no cost.
+  Streamlit Community Cloud runs no FastAPI process and Vercel is serverless
+  (no long-running Streamlit/WebSocket server).
 - **Model B (XGBoost) instead of the Random Forest.** The Random Forest of #32
   needs ~1.17 GiB of RAM in the running container; Render free has 512 MB.
   Model B: validation accuracy 0.9471 vs 0.9520 (RF), macro F1 0.9244 vs
@@ -81,9 +82,9 @@ Boundary notes:
 - `render.yaml` points to `branch: feature/39-cloud-deployment` only to test
   on Render before the PR. **After the merge it must go back to
   `branch: develop`.**
-- Pending decision of the owner: removing `src/lite_model.py` (untracked),
-  `models/lite_candidates/` (git-ignored) and `deploy/huggingface/`, which
-  belong to the abandoned "lite model" and Hugging Face plans.
+- Removed with the owner's approval: `deploy/huggingface/` (abandoned
+  hosting plan) and, outside Git, the abandoned "lite model" files
+  (`src/lite_model.py`, untracked; `models/lite_candidates/`, git-ignored).
 
 ## Acceptance criteria
 
