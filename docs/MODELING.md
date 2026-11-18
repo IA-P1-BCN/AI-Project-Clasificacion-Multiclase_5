@@ -147,8 +147,9 @@ out-of-fold predictions.
   train.
 
 Before Random Forest is carried to deployment, two things still need measuring:
-its overfitting gap (#28) — the forest runs without `max_depth`, so the < 5%
-criterion may not hold as is — and the size of the serialized model
+its overfitting gap (#28 — resolved: accuracy gap +4.80 points, below the 5 %
+gate) — the forest runs without `max_depth`, so the < 5 % criterion may not
+hold as is — and the size of the serialized model
 (`.joblib`), which the API loads at start-up and Docker packages (#34). Tuning
 (#29) should also try the eight selected features of #18 on Random Forest; they
 lifted XGBoost in validation but have not been tested on the forest.
