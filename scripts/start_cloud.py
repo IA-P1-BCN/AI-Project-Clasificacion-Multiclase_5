@@ -1,7 +1,8 @@
 """Cloud deployment entrypoint and readiness verifier (issue #39).
 
-Primary target: Hugging Face Spaces (Docker SDK, see `deploy/huggingface/`);
-`render.yaml` is kept as an alternative.
+Target: Render free plan (512 MB, 0.1 CPU), configured in `render.yaml`. It
+serves the tuned XGBoost of #52 (model B, release `model-b-v1`) as the only
+model: the Random Forest of #32 needs ~1.17 GiB of RAM and does not fit.
 
 Model provisioning: an existing `MODEL_PATH` is used as-is; otherwise, when
 `MODEL_URL` is set, the exported model is downloaded (optionally checked
@@ -11,10 +12,15 @@ synthetic bootstrap model.
 Supports three runtime modes via `SERVICE_ROLE`:
 - `all` (default): ensures a model artifact is present at
   `MODEL_PATH`, initializes the database, starts the FastAPI backend on
-  `127.0.0.1:8000`, waits for `/health`, and runs the Streamlit frontend in the
-  foreground on `0.0.0.0:$PORT`.
+  `127.0.0.1:8000`, waits for `/health` (up to `API_STARTUP_TIMEOUT` seconds,
+  default 300, so a 0.1-CPU instance has time to import and load), and runs
+  the Streamlit frontend in the foreground on `0.0.0.0:$PORT`.
 - `api`: runs only the FastAPI backend (`uvicorn app.api:app`) on `0.0.0.0:$PORT`.
 - `app`: runs only the Streamlit frontend (`streamlit run app/main.py`) on `0.0.0.0:$PORT`.
+
+Model provisioning and database initialization run in a child process
+(`--provision`) that exits before the services start, so its memory is released:
+the long-lived launcher only uses the standard library.
 
 Run `python scripts/start_cloud.py --check` to execute a self-cleaning end-to-end
 verification of the cloud bootstrap, FastAPI endpoints and Streamlit health check.
@@ -34,26 +40,20 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import joblib
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
-from app.serving import MODEL_PATH, load_model  # noqa: E402
-from data_cleaning import (  # noqa: E402
-    FEATURES,
-    SOIL_FEATURES,
-    WILDERNESS_FEATURES,
-)
-from database import init_db  # noqa: E402
-from export_model import build_pipeline, label_mapping  # noqa: E402
-from target_encoding import CLASS_NAMES  # noqa: E402
+# Project and ML modules (pandas, scikit-learn, XGBoost, SQLAlchemy) are imported
+# inside the functions that need them: the long-lived launcher process of
+# `run_services` stays on the standard library, so on Render's 512 MB it does
+# not hold ~100 MiB of imports next to the API and Streamlit.
 
 RANDOM_STATE = 42
+# Seconds to wait for FastAPI /health in `SERVICE_ROLE=all`. Generous because
+# Render's free plan has 0.1 CPU: imports plus model loading take ~1 minute.
+API_STARTUP_TIMEOUT_S = float(os.getenv("API_STARTUP_TIMEOUT", "300"))
 CLOUD_BOOTSTRAP_VERSION = "0.1.0-cloud-bootstrap"
 
 # Class-conditional elevation centers (meters) matching Covertype domain ranges
@@ -72,6 +72,11 @@ CLASS_ELEVATION_CENTERS = {
 
 def build_bootstrap_dataset(rows_per_class: int = 200, random_state: int = RANDOM_STATE) -> tuple[pd.DataFrame, pd.Series]:
     """Generate a deterministic 7-class cartographic dataset within physical bounds."""
+    import numpy as np
+    import pandas as pd
+    from data_cleaning import FEATURES, SOIL_FEATURES, WILDERNESS_FEATURES
+    from target_encoding import CLASS_NAMES
+
     rng = np.random.default_rng(random_state)
     records: list[dict[str, int]] = []
     targets: list[int] = []
@@ -151,7 +156,7 @@ def download_file(
     return {"path": str(dest), "size_bytes": size, "sha256": actual}
 
 
-def fetch_remote_model(model_path: Path = MODEL_PATH, env: dict | None = None) -> dict | None:
+def fetch_remote_model(model_path: Path | None = None, env: dict | None = None) -> dict | None:
     """Download the exported model from `MODEL_URL` when it is not present yet.
 
     Returns None when `MODEL_URL` is unset. When it is set, any failure (network,
@@ -159,11 +164,13 @@ def fetch_remote_model(model_path: Path = MODEL_PATH, env: dict | None = None) -
     loudly instead of silently falling back to the synthetic bootstrap model.
     `MODEL_METADATA_URL` (optional) fetches `model_metadata.json` next to it.
     """
+    from app.serving import MODEL_PATH, load_model
+
     env = os.environ if env is None else env
     url = (env.get("MODEL_URL") or "").strip()
     if not url:
         return None
-    model_path = Path(model_path)
+    model_path = Path(model_path or MODEL_PATH)
     if load_model(model_path).ready:
         return {"status": "existing", "model_path": str(model_path)}
 
@@ -184,7 +191,7 @@ def fetch_remote_model(model_path: Path = MODEL_PATH, env: dict | None = None) -
     }
 
 
-def ensure_cloud_model(model_path: Path = MODEL_PATH, env: dict | None = None) -> dict:
+def ensure_cloud_model(model_path: Path | None = None, env: dict | None = None) -> dict:
     """Ensure a loadable 54-feature pipeline exists at `model_path`.
 
     Resolution order:
@@ -196,7 +203,12 @@ def ensure_cloud_model(model_path: Path = MODEL_PATH, env: dict | None = None) -
        the git-ignored artifacts still starts. Its predictions are NOT those of
        the project model (`model_version = "0.1.0-cloud-bootstrap"`).
     """
-    model_path = Path(model_path)
+    import joblib
+    from app.serving import MODEL_PATH, load_model
+    from data_cleaning import FEATURES
+    from export_model import build_pipeline, label_mapping
+
+    model_path = Path(model_path or MODEL_PATH)
     loaded = load_model(model_path)
     if loaded.ready:
         return {"status": "existing", "model_path": str(model_path)}
@@ -243,11 +255,17 @@ def ensure_cloud_model(model_path: Path = MODEL_PATH, env: dict | None = None) -
     return {"status": "bootstrapped", "model_path": str(model_path)}
 
 
-def wait_for_url(url: str, timeout_s: float = 30.0) -> dict | str:
-    """Poll `url` until HTTP 200 or raise TimeoutError."""
+def wait_for_url(url: str, timeout_s: float = 30.0, proc: subprocess.Popen | None = None) -> dict | str:
+    """Poll `url` until HTTP 200 or raise TimeoutError.
+
+    When `proc` is given and it exits first (e.g. killed for running out of
+    memory), raise RuntimeError at once instead of waiting for the timeout.
+    """
     deadline = time.monotonic() + timeout_s
     last_error: Exception | None = None
     while time.monotonic() < deadline:
+        if proc is not None and proc.poll() is not None:
+            raise RuntimeError(f"Process serving {url} exited with code {proc.returncode} before becoming ready")
         try:
             with urllib.request.urlopen(url, timeout=2.0) as resp:
                 body = resp.read().decode("utf-8")
@@ -277,6 +295,8 @@ def post_json(url: str, payload: dict) -> dict:
 
 def run_self_check() -> int:
     """Verify cloud model provisioning, DB init, FastAPI and Streamlit in an isolated temp dir."""
+    from database import init_db
+
     print("== Cloud deployment self-check (issue #39) ==")
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
@@ -386,13 +406,11 @@ def run_self_check() -> int:
     return 0
 
 
-def run_services() -> int:
-    """Start the configured cloud service role (`all`, `api` or `app`)."""
-    role = os.getenv("SERVICE_ROLE", "all").strip().lower()
-    port = os.getenv("PORT", "8501" if role != "api" else "8000")
-    api_port = os.getenv("API_PORT", "8000")
+def provision() -> int:
+    """Ensure the model at MODEL_PATH and initialize the database (child of `run_services`)."""
+    from database import init_db
 
-    model_info = ensure_cloud_model(MODEL_PATH)
+    model_info = ensure_cloud_model()
     print(f"[start_cloud] model status: {model_info['status']} at {model_info['model_path']}", flush=True)
 
     try:
@@ -400,6 +418,18 @@ def run_services() -> int:
         print("[start_cloud] database initialized.", flush=True)
     except Exception as exc:
         print(f"[start_cloud] warning: database init skipped ({exc})", flush=True)
+    return 0
+
+
+def run_services() -> int:
+    """Start the configured cloud service role (`all`, `api` or `app`)."""
+    role = os.getenv("SERVICE_ROLE", "all").strip().lower()
+    port = os.getenv("PORT", "8501" if role != "api" else "8000")
+    api_port = os.getenv("API_PORT", "8000")
+
+    # Provision in a child process: its memory (ML imports, model loaded for
+    # verification) goes back to the OS before the API loads its own copy.
+    subprocess.run([sys.executable, str(Path(__file__).resolve()), "--provision"], check=True)
 
     if role == "api":
         cmd = [
@@ -424,7 +454,7 @@ def run_services() -> int:
         ],
         cwd=str(ROOT),
     )
-    wait_for_url(f"http://127.0.0.1:{api_port}/health", timeout_s=30.0)
+    wait_for_url(f"http://127.0.0.1:{api_port}/health", timeout_s=API_STARTUP_TIMEOUT_S, proc=api_proc)
     print(f"[start_cloud] FastAPI healthy at http://127.0.0.1:{api_port}", flush=True)
 
     ui_proc = subprocess.Popen(
@@ -454,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     args = argv if argv is not None else sys.argv[1:]
     if "--check" in args:
         return run_self_check()
+    if "--provision" in args:
+        return provision()
     return run_services()
 
 
